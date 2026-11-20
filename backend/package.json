@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/backend/src/index.js",
   "scripts": {
+    "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/backend/src/index.js",
     "test:phase1": "tsx src/testPhase1.ts",
