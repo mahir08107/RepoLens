@@ -1,109 +1,155 @@
-// backend/src/ai/geminiArchitect.ts
-/**
- * Module that uses Gemini Flash Lite (or Gemini API) to generate an ArchitectureMap
- * from a RepoSkeleton and a set of ArchitectureZone classifications.
- * It returns a Mermaid graph definition that can be rendered directly by the
- * frontend.
- */
-import { RepoSkeleton, ArchitectureZone, ArchitectureMap } from "../../shared/types";
+import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+import { ArchitectureMap, FileSkeleton, MapEdge, MapNode, RepoSkeleton } from '../../../shared/types.js';
+import { LabeledModule } from './gemmaLabeler.js';
 
-export class GeminiArchitectError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "GeminiArchitectError";
+dotenv.config();
+
+/**
+ * Strips markdown code blocks/fences (e.g. ```json ... ```) from model output.
+ */
+function cleanJsonOutput(text: string): string {
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, '');
+    cleaned = cleaned.replace(/\n?```$/, '');
   }
+  return cleaned.trim();
 }
 
 /**
- * Calls the Gemini model endpoint. Wrappers the fetch call with retry logic for
- * rate‑limit (429) and transient network errors.
+ * Uses Gemini Flash Lite to infer architectural dependency edges between classified modules.
+ * Strictly takes structural skeletons (imports, exports, functionSignatures) - never raw function bodies.
  */
-async function callGeminiModel(payload: any): Promise<any> {
-  const endpoint = process.env.GEMINI_ENDPOINT ?? "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new GeminiArchitectError("Gemini API key not set in GEMINI_API_KEY.");
-  }
-
-  const url = `${endpoint}?key=${apiKey}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+export async function buildArchitectureMap(
+  skeleton: RepoSkeleton,
+  labeledModules: LabeledModule[]
+): Promise<ArchitectureMap> {
+  // 1. Assign clean deterministic node IDs (node-0, node-1, ...) mapped to each filePath
+  const filePathToIdMap = new Map<string, string>();
+  const nodes: MapNode[] = labeledModules.map((mod, index) => {
+    const id = `node-${index}`;
+    filePathToIdMap.set(mod.filePath, id);
+    return {
+      id,
+      label: mod.label,
+      filePath: mod.filePath,
+      zone: mod.zone,
+      summary: mod.summary,
+    };
   });
 
-  if (!response.ok) {
-    const body = await response.text();
-    if (response.status === 429) {
-      throw new GeminiArchitectError(`Rate limit hit: ${body}`);
-    }
-    throw new GeminiArchitectError(`Gemini request failed (${response.status}): ${body}`);
-  }
-  return response.json();
-}
+  const validNodeIds = new Set(nodes.map((n) => n.id));
 
-/**
- * Build a prompt that asks Gemini to produce a Mermaid graph describing the
- * architecture. The prompt includes zones and a short list of files per zone to
- * keep the token count reasonable.
- */
-function buildPrompt(skeleton: RepoSkeleton, zones: ArchitectureZone[]): string {
-  const zoneSummaries = zones
-    .map(
-      (z) =>
-        `Zone: ${z.name}\nDescription: ${z.description ?? ""}\nModules:\n${z.modules
-          .map((m) => ` - ${m}`)
-          .join("\n")}`
-    )
-    .join("\n\n");
-
-  const intro = `You are an AI architect. Given the following zones of a TypeScript/JavaScript project, generate a Mermaid directed graph (graph TD) that visualises the zones as sub‑graphs with colour hints if provided. Connect zones with edges where there is likely interaction based on typical naming conventions (e.g., frontend calls backend APIs). Produce only the Mermaid definition, no extra text.`;
-
-  return `${intro}\n\n${zoneSummaries}`;
-}
-
-/**
- * Main class that produces an ArchitectureMap.
- */
-export class GeminiArchitect {
-  /**
-   * Generate an ArchitectureMap from a repository skeleton and its zones.
-   */
-  async generateMap(skeleton: RepoSkeleton, zones: ArchitectureZone[]): Promise<ArchitectureMap> {
-    if (!zones.length) {
-      throw new GeminiArchitectError("No zones provided for architecture generation.");
-    }
-    const prompt = buildPrompt(skeleton, zones);
-    const payload = {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 2048 },
+  // Prepare structural context for Gemini
+  const nodeContext = nodes.map((node) => {
+    const fileSkeleton = skeleton.files.find((f) => f.filePath === node.filePath);
+    return {
+      id: node.id,
+      filePath: node.filePath,
+      label: node.label,
+      zone: node.zone,
+      imports: fileSkeleton?.imports || [],
+      exports: fileSkeleton?.exports || [],
+      functionSignatures: fileSkeleton?.functionSignatures || [],
     };
+  });
 
-    let result;
-    try {
-      result = await callGeminiModel(payload);
-    } catch (e) {
-      throw new GeminiArchitectError(`Gemini generation failed: ${(e as Error).message}`);
-    }
+  const apiKey = process.env.GEMINI_API_KEY;
+  const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
-    // Gemini returns a nested response; extract the text.
-    const output = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!output) {
-      throw new GeminiArchitectError("Gemini returned empty output.");
-    }
+  // Use process.env.GEMINI_FLASH_MODEL with 'gemini-2.5-flash-lite' as default fallback
+  const modelName = process.env.GEMINI_FLASH_MODEL || 'gemini-2.5-flash-lite';
 
-    // Basic validation of Mermaid definition (must start with "graph").
-    if (!/^graph\s+[A-Z]+/.test(output)) {
-      throw new GeminiArchitectError(`Invalid Mermaid definition received: ${output.substring(0, 200)}`);
-    }
+  const systemPrompt = `You are a software architecture analysis engine.
+You are given a list of architectural nodes from a repository with deterministic IDs (node-0, node-1, etc.).
+Each node includes its assigned zone (Auth, Database, Payments, Interface, Services), imports, exports, and function signatures.
+Note: Raw function implementation bodies are omitted for privacy.
 
-    const map: ArchitectureMap = {
-      id: skeleton.commitSha,
-      title: `Architecture for ${skeleton.repoUrl}`,
-      zones,
-      edges: [], // edges can be parsed later if needed; left empty for now.
-      mermaidDefinition: output,
-    };
-    return map;
+Your task is to infer architectural dependency edges between the nodes based on:
+1. Direct import paths and references
+2. Exported symbols used by other files
+3. Natural architectural flow (e.g., Interface calling Services, Services calling Database or Payments, Auth verifying access for Services/Interface)
+
+Requirements for edges:
+- ONLY output dependencies between the provided node IDs.
+- "id": "edge-0", "edge-1", etc.
+- "source": valid source node ID (the caller or dependent node)
+- "target": valid target node ID (the dependency or called module)
+- "relation": a short explanation of the relationship (e.g. "imports auth middleware", "calls payment service", "queries database schema")
+- Do NOT create self-loops (source === target).
+- Do NOT invent or hallucinate node IDs that do not exist in the input list.
+
+Return ONLY a valid JSON array of MapEdge objects matching this schema:
+[
+  {
+    "id": string,
+    "source": string,
+    "target": string,
+    "relation": string
   }
+]
+Do NOT include markdown fences, code backticks, or any explanatory text. Pure JSON only.`;
+
+  const userPrompt = `${systemPrompt}\n\nNodes to analyze:\n${JSON.stringify(nodeContext, null, 2)}`;
+
+  let edges: MapEdge[] = [];
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: userPrompt,
+      config: {
+        temperature: 0.1,
+      },
+    });
+
+    const rawText = response.text || '';
+    const cleaned = cleanJsonOutput(rawText);
+    const parsedEdges = JSON.parse(cleaned);
+
+    if (Array.isArray(parsedEdges)) {
+      edges = parsedEdges
+        .filter((edge: any) => {
+          const isValidSource = edge && typeof edge.source === 'string' && validNodeIds.has(edge.source);
+          const isValidTarget = edge && typeof edge.target === 'string' && validNodeIds.has(edge.target);
+          const isNotSelfLoop = edge.source !== edge.target;
+          return isValidSource && isValidTarget && isNotSelfLoop;
+        })
+        .map((edge: any, idx: number) => ({
+          id: typeof edge.id === 'string' && edge.id ? edge.id : `edge-${idx}`,
+          source: edge.source,
+          target: edge.target,
+          relation: typeof edge.relation === 'string' ? edge.relation : 'depends on',
+        }));
+    }
+  } catch (err) {
+    console.warn('[geminiArchitect] Edge generation encountered error, applying heuristic fallback:', err);
+    // Heuristic fallback for edges based on import file paths
+    let edgeIdx = 0;
+    for (const sourceNode of nodes) {
+      const srcFile = skeleton.files.find((f) => f.filePath === sourceNode.filePath);
+      if (!srcFile) continue;
+
+      for (const targetNode of nodes) {
+        if (sourceNode.id === targetNode.id) continue;
+        const targetBaseName = targetNode.filePath.split('/').pop()?.replace(/\.[^/.]+$/, '');
+        if (targetBaseName && srcFile.imports.some((imp) => imp.includes(targetBaseName))) {
+          edges.push({
+            id: `edge-${edgeIdx++}`,
+            source: sourceNode.id,
+            target: targetNode.id,
+            relation: `imports ${targetNode.label}`,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    repoUrl: skeleton.repoUrl,
+    commitSha: skeleton.commitSha,
+    nodes,
+    edges,
+  };
 }

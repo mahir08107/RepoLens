@@ -1,144 +1,173 @@
-// backend/src/ai/gemmaLabeler.ts
-/**
- * Module that uses the Gemma 4B model to classify repository modules into zones.
- * It receives a RepoSkeleton (lightweight representation of the repo) and
- * returns an array of ArchitectureZone objects.
- */
-import { RepoSkeleton, ArchitectureZone } from "../../shared/types";
+import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+import { FileSkeleton, ZoneCategory } from '../../../shared/types.js';
 
-/**
- * Custom error thrown when the labeling service fails.
- */
-export class GemmaLabelingError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "GemmaLabelingError";
-  }
+dotenv.config();
+
+export interface LabeledModule {
+  filePath: string;
+  label: string;
+  zone: ZoneCategory;
+  summary: string;
+}
+
+const ALLOWED_ZONES: readonly ZoneCategory[] = [
+  'Auth',
+  'Database',
+  'Payments',
+  'Interface',
+  'Services',
+] as const;
+
+function isValidZone(zone: unknown): zone is ZoneCategory {
+  return typeof zone === 'string' && ALLOWED_ZONES.includes(zone as ZoneCategory);
 }
 
 /**
- * Helper to chunk a large repository skeleton into manageable payloads for the
- * model. Gemma 4B has token limits, so we split the files into groups.
+ * Strips markdown code blocks/fences (e.g. ```json ... ```) from model output.
  */
-function chunkFiles(files: RepoSkeleton["files"], maxChunkSize: number = 2000) {
-  const chunks: RepoSkeleton["files"][] = [];
-  let current: typeof files = [];
-  let currentSize = 0;
-
-  for (const file of files) {
-    const estimatedSize = file.path.length + file.strippedContent.length;
-    if (currentSize + estimatedSize > maxChunkSize && current.length) {
-      chunks.push(current);
-      current = [];
-      currentSize = 0;
-    }
-    current.push(file);
-    currentSize += estimatedSize;
+function cleanJsonOutput(text: string): string {
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, '');
+    cleaned = cleaned.replace(/\n?```$/, '');
   }
-  if (current.length) chunks.push(current);
-  return chunks;
+  return cleaned.trim();
 }
 
 /**
- * Calls the Gemma model endpoint. This is a thin wrapper around the fetch API
- * that adds standard headers and retries on transient errors (e.g., rate limits
- * or network hiccups).
+ * Classifies repository files into zones using Google AI Studio / Gemma 4B.
+ * Input files contain ONLY structural skeletons (paths, imports, exports, signatures—never raw bodies).
  */
-async function callGemmaModel(payload: any): Promise<any> {
-  const endpoint = process.env.GEMMA_ENDPOINT ?? "https://api.gemma.dev/v1/predict";
-  const token = process.env.GEMMA_API_KEY;
-  if (!token) {
-    throw new GemmaLabelingError("Gemma API key not configured in GEMMA_API_KEY environment variable.");
+export async function labelModulesWithGemma(files: FileSkeleton[]): Promise<LabeledModule[]> {
+  if (!files || files.length === 0) {
+    return [];
   }
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    // Detect GitHub‑style rate‑limit response (429) or generic 5xx.
-    if (response.status === 429) {
-      throw new GemmaLabelingError(`Rate limit exceeded: ${body}`);
-    }
-    throw new GemmaLabelingError(`Gemma request failed (${response.status}): ${body}`);
-  }
-  return response.json();
-}
-
-/**
- * Main class exported from this module.
- */
-export class GemmaLabeler {
-  /**
-   * Classify modules into zones.
-   * @param repo Skeleton of the repository.
-   * @returns Array of ArchitectureZone objects.
-   * @throws GemmaLabelingError on any failure.
-   */
-  async labelModules(repo: RepoSkeleton): Promise<ArchitectureZone[]> {
-    if (!repo.files?.length) {
-      throw new GemmaLabelingError("RepoSkeleton contains no files to label.");
-    }
-
-    const chunks = chunkFiles(repo.files);
-    const zones: ArchitectureZone[] = [];
-
-    for (const chunk of chunks) {
-      const prompt = this.buildPrompt(chunk);
-      const payload = { prompt, max_output_tokens: 1024 };
-      let result;
-      try {
-        result = await callGemmaModel(payload);
-      } catch (e) {
-        // Propagate labeling errors with context about which chunk failed.
-        throw new GemmaLabelingError(`Failed labeling chunk: ${(e as Error).message}`);
-      }
-
-      // Expect the model to return a JSON list of zones.
-      try {
-        const parsed = JSON.parse(result.output_text ?? "[]");
-        if (Array.isArray(parsed)) {
-          zones.push(...parsed);
-        }
-      } catch (parseErr) {
-        // If parsing fails, continue with next chunk but surface a warning.
-        console.warn("GemmaLabeler: Unable to parse model output", parseErr);
-      }
-    }
-
-    // Deduplicate zones by name.
-    const unique: Record<string, ArchitectureZone> = {};
-    for (const z of zones) {
-      if (!unique[z.name]) {
-        unique[z.name] = { ...z, modules: [...z.modules] };
-      } else {
-        // Merge module lists.
-        const existing = unique[z.name];
-        existing.modules = Array.from(new Set([...existing.modules, ...z.modules]));
-        if (z.description) existing.description ??= z.description;
-        if (z.colour) existing.colour ??= z.colour;
-      }
-    }
-    return Object.values(unique);
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn('[gemmaLabeler] Warning: GEMINI_API_KEY is not set in environment.');
   }
 
-  /**
-   * Build a prompt for the Gemma model from a chunk of files.
-   */
-  private buildPrompt(files: RepoSkeleton["files"]): string {
-    const fileSummaries = files
-      .map((f) => `Path: ${f.path}\nContent:\n${f.strippedContent.slice(0, 500)}\n---`)
-      .join("\n");
-    return `You are an AI that groups source files of a TypeScript/JavaScript project into logical zones (e.g., "frontend", "backend", "utils").
-Identify the zone name, a short description, and list the file paths belonging to each zone.
-Return the result as a JSON array of objects with fields: name, description, modules, colour (optional).
+  const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
-Repository files (truncated to first 500 characters each):\n${fileSummaries}`;
+  // Priority model sequence:
+  // User configurable via GEMMA_MODEL_NAME, defaulting to 'gemma-3-4b-it'.
+  // If the model is not found or unavailable (503 high demand), fallback to other Gemma models or Gemini.
+  const configuredModel = process.env.GEMMA_MODEL_NAME || 'gemma-3-4b-it';
+  const candidateModels = Array.from(
+    new Set([
+      configuredModel,
+      'gemma-3-4b-it',
+      'gemma-4b',
+      'gemma-4-26b-a4b-it',
+      'gemini-2.5-flash-lite',
+    ])
+  );
+
+  const systemInstruction = `You are an expert software architect AI.
+Your task is to analyze the structural skeletons of source code files (file path, imports, exports, function signatures) and classify each file.
+For privacy reasons, only structural skeletons are provided without any function implementation bodies.
+
+You must classify each file strictly into ONE of the following 5 ZoneCategory values:
+1. "Auth" (authentication, authorization, session management, tokens, user security)
+2. "Database" (database connections, ORM models, schemas, repositories, migrations)
+3. "Payments" (billing, checkout, payment processing, gateways, invoices)
+4. "Interface" (UI components, layouts, pages, views, frontend state presentation, API controllers)
+5. "Services" (business logic, background workers, external integrations, utility services, helpers)
+
+For each file, produce:
+- "filePath": exactly matches the input filePath
+- "label": a clean, concise 1-2 word display label (e.g., "Login", "Checkout", "Order Schema", "Stripe Gateway", "Notification Service")
+- "zone": strictly one of "Auth", "Database", "Payments", "Interface", "Services"
+- "summary": a single-sentence clear summary describing the role and responsibility of the file.
+
+Return strictly a valid JSON array of objects with the exact schema:
+[
+  {
+    "filePath": string,
+    "label": string,
+    "zone": "Auth" | "Database" | "Payments" | "Interface" | "Services",
+    "summary": string
+  }
+]
+Do NOT include any markdown fences or conversational text. Output pure JSON only.`;
+
+  const prompt = `${systemInstruction}\n\nFiles to classify:\n${JSON.stringify(files, null, 2)}`;
+
+  let rawText = '';
+  let successfulModel = '';
+
+  for (const model of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          temperature: 0.1,
+        },
+      });
+
+      rawText = response.text || '';
+      successfulModel = model;
+      break;
+    } catch (err: any) {
+      console.warn(`[gemmaLabeler] Model '${model}' failed: ${err?.message || err}. Trying next fallback candidate...`);
+    }
+  }
+
+  if (!rawText) {
+    console.error('[gemmaLabeler] All model candidates failed to respond.');
+    return files.map((file) => ({
+      filePath: file.filePath,
+      label: file.filePath.split('/').pop()?.replace(/\.[^/.]+$/, '') || 'Module',
+      zone: 'Services' as ZoneCategory,
+      summary: `Fallback classification for ${file.filePath}: All model endpoints were unavailable.`,
+    }));
+  }
+
+  try {
+    const cleanedText = cleanJsonOutput(rawText);
+
+    let parsed: any[];
+    try {
+      parsed = JSON.parse(cleanedText);
+    } catch (parseErr) {
+      console.error('[gemmaLabeler] Failed to parse model output as JSON. Raw output was:\n', rawText);
+      throw new Error(`JSON parse error from model (${successfulModel}) output: ${(parseErr as Error).message}`);
+    }
+
+    if (!Array.isArray(parsed)) {
+      throw new Error(`Model (${successfulModel}) output is not a JSON array.`);
+    }
+
+    // Defensive mapping and fallback to ensure contract adherence
+    const labeledModules: LabeledModule[] = files.map((file) => {
+      const match = parsed.find((item) => item?.filePath === file.filePath) || {};
+      const zone: ZoneCategory = isValidZone(match.zone) ? match.zone : 'Services';
+      const label = typeof match.label === 'string' && match.label.trim().length > 0
+        ? match.label.trim()
+        : file.filePath.split('/').pop()?.replace(/\.[^/.]+$/, '') || 'Module';
+      const summary = typeof match.summary === 'string' && match.summary.trim().length > 0
+        ? match.summary.trim()
+        : `Service module handling ${label}.`;
+
+      return {
+        filePath: file.filePath,
+        label,
+        zone,
+        summary,
+      };
+    });
+
+    return labeledModules;
+  } catch (error) {
+    console.error('[gemmaLabeler] Error during module classification post-processing:', error);
+    return files.map((file) => ({
+      filePath: file.filePath,
+      label: file.filePath.split('/').pop()?.replace(/\.[^/.]+$/, '') || 'Module',
+      zone: 'Services' as ZoneCategory,
+      summary: `Fallback classification for ${file.filePath} due to error: ${(error as Error).message}`,
+    }));
   }
 }
