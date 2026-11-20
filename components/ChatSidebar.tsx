@@ -1,261 +1,367 @@
 'use client';
-import React, { useState, useEffect, useRef, FormEvent } from "react";
-import { Sparkles, Send, Lock, X, Bot, User, CheckCircle2, CornerDownLeft } from "lucide-react";
-import type { RepoSkeleton } from "@/shared/types";
+import React, { useState, useEffect, useRef } from "react";
+import { Sparkles, Send, X, AlertTriangle, FileCode2 } from "lucide-react";
+import type { ChatRequest, ChatResponse, RepoSkeleton } from "@/shared/types";
+import type { CanvasNode, NodeRegistry } from "@/lib/node-registry";
+import { API_BASE_URL } from "@/lib/api-config";
+import MarkdownMessage from "@/components/MarkdownMessage";
 
 export interface ChatMessageItem {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
   highlightedNodeIds?: string[];
+  isError?: boolean;
 }
 
 interface ChatSidebarProps {
   repoSkeleton: RepoSkeleton | null;
-  selectedId: string | null;
+  repoUrl: string | null;
+  commitSha: string | null;
+  selectedNode: CanvasNode | null;
+  registry: NodeRegistry;
   onSelectionClear: () => void;
-  onHighlightNodes?: (nodeIds: string[]) => void;
+  onHighlightNodes: (nodeIds: string[]) => void;
+  onFocusNode: (nodeId: string, highlightIds?: string[]) => void;
+  onClose?: () => void;
 }
+
+const QUICK_PROMPTS = ["Explain module purpose", "Show dependent files", "Identify entry point"];
+
+const formatTime = () =>
+  typeof window !== "undefined"
+    ? new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
 
 const ChatSidebar: React.FC<ChatSidebarProps> = ({
   repoSkeleton,
-  selectedId,
+  repoUrl,
+  commitSha,
+  selectedNode,
+  registry,
   onSelectionClear,
   onHighlightNodes,
+  onFocusNode,
+  onClose,
 }) => {
+  // Use a stable, static initial state to avoid server/client hydration mismatch
   const [messages, setMessages] = useState<ChatMessageItem[]>([
     {
       role: "assistant",
       content:
         "👋 Hi! I'm your **RepoLens Architecture Copilot**. I analyze the repository structure from its privacy-sanitized AST skeleton.\n\nClick any node on the left diagram or ask me about architecture, module boundaries, or call chains!",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: "",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  // Set the initial message timestamp after mounting on client to guarantee 0 hydration mismatch
+  useEffect(() => {
+    setMessages((prev) =>
+      prev.map((m, idx) => (idx === 0 && !m.timestamp ? { ...m, timestamp: formatTime() } : m))
+    );
+  }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // When user clicks a node on the canvas, add a gentle conversational prompt
-  useEffect(() => {
-    if (selectedId) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `📌 You selected **\`${selectedId}\`**. What would you like to know about this module or its connections?`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          highlightedNodeIds: [selectedId],
-        },
-      ]);
-      if (onHighlightNodes) onHighlightNodes([selectedId]);
-    }
-  }, [selectedId]);
+  const pushMessage = (msg: ChatMessageItem) => setMessages((prev) => [...prev, msg]);
 
   const handleSend = async (questionText?: string) => {
-    const q = (questionText || input).trim();
-    if (!q || loading) return;
+    const question = (questionText ?? input).trim();
+    if (!question || loading) return;
 
-    const userMessage: ChatMessageItem = {
-      role: "user",
-      content: q,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    pushMessage({ role: "user", content: question, timestamp: formatTime() });
     setInput("");
+
+    if (!commitSha || !repoSkeleton || !repoSkeleton.files?.length) {
+      pushMessage({
+        role: "assistant",
+        content:
+          "No architecture map is loaded yet. Paste a GitHub repository URL above and click **Generate** first, then ask me again.",
+        timestamp: formatTime(),
+        isError: true,
+      });
+      return;
+    }
+
     setLoading(true);
 
+    // Backend-native node ID (e.g. `node-3`) when the map came from Cloud Run.
+    const backendNodeId = selectedNode ? registry.toBackendId(selectedNode.id) : undefined;
+    // If the backend has no cached map for this node, give it the file path as extra context.
+    const contextualQuestion =
+      selectedNode && !selectedNode.archId && selectedNode.filePath
+        ? `${question}\n\n(Selected module: ${selectedNode.label} — \`${selectedNode.filePath}\`)`
+        : question;
+
+    const payload: ChatRequest & { repoUrl: string } = {
+      repoUrl: repoUrl || repoSkeleton.repoUrl,
+      commitSha,
+      question: contextualQuestion,
+      selectedNodeId: backendNodeId,
+      skeleton: repoSkeleton,
+    };
+
     try {
-      // Call chat API
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId: "session-1",
-          repoSkeleton,
-          messages: [...messages, userMessage],
-          selectedId,
-        }),
-      });
+      // 1. Send request with an active 12-second timeout guard
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
+      let res: Response;
+      const targetUrl = API_BASE_URL ? `${API_BASE_URL}/api/chat` : "/api/chat";
+
+      try {
+        res = await fetch(targetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        // If Express backend is offline, refused connection, or timed out, gracefully fallback to local Next.js API route
+        if (targetUrl !== "/api/chat") {
+          res = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          throw fetchErr;
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(`Chat request failed (${res.status})`);
+        throw new Error(data?.error || data?.details || `Chat request failed (HTTP ${res.status})`);
       }
 
-      const data = await res.json();
-      const lastMsg = data.messages?.[data.messages.length - 1];
-      const botReply = lastMsg?.content || "Analyzed architecture module context.";
+      const response = data as ChatResponse;
+      const answer = response?.answer?.trim() || "The copilot returned an empty answer.";
+      const mapped = Array.from(
+        new Set(
+          (response?.highlightedNodeIds || [])
+            .map((id) => registry.resolve(id))
+            .filter((id): id is string => Boolean(id))
+        )
+      );
+      const highlightIds = mapped.length > 0 ? mapped : registry.findMentioned(answer);
 
-      // Extract referenced node highlights if any
-      const inferredHighlights = selectedId ? [selectedId] : [];
-      if (q.toLowerCase().includes("database") || q.toLowerCase().includes("db")) {
-        inferredHighlights.push("db", "models");
-      }
-      if (q.toLowerCase().includes("auth") || q.toLowerCase().includes("jwt")) {
-        inferredHighlights.push("jwt", "authGuard");
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: botReply,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          highlightedNodeIds: inferredHighlights,
-        },
-      ]);
-
-      if (onHighlightNodes && inferredHighlights.length > 0) {
-        onHighlightNodes(inferredHighlights);
-      }
+      pushMessage({ role: "assistant", content: answer, timestamp: formatTime(), highlightedNodeIds: highlightIds });
+      if (highlightIds.length > 0) onHighlightNodes(highlightIds);
     } catch (err: any) {
-      // Graceful fallback for mock mode or offline dev
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Based on the repository skeleton: **${selectedId || 'this module'}** orchestrates key lifecycle operations. Its dependencies are isolated through interfaces, preventing direct coupling to the underlying storage engines.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          highlightedNodeIds: selectedId ? [selectedId] : [],
-        },
-      ]);
+      pushMessage({
+        role: "assistant",
+        content: `Couldn't reach the RepoLens backend at \`${API_BASE_URL}/api/chat\`.\n\n${err?.message || "Unknown error"}`,
+        timestamp: formatTime(),
+        isError: true,
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const quickPrompts = [
-    "Explain module purpose",
-    "Show dependent files",
-    "Identify entry point",
-  ];
+  const handleQuickPrompt = (prompt: string) => {
+    const target = selectedNode ? `: ${selectedNode.label} (${selectedNode.filePath || selectedNode.id})` : "";
+    handleSend(`${prompt}${target}`);
+  };
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+    <div className="flex flex-col h-full bg-white rounded-xl border border-[#d0d7de] shadow-xs overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
-        <div className="flex items-center space-x-2">
-          <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
-            <Sparkles className="w-4 h-4" />
+      <div className="px-3.5 py-2.5 border-b border-[#d0d7de] flex items-center justify-between gap-2 bg-[#f6f8fa]">
+        <div className="flex items-center space-x-2 shrink-0">
+          <div className="w-6 h-6 rounded-md bg-[#1f2328] text-white flex items-center justify-center shadow-xs">
+            <Sparkles className="w-3.5 h-3.5 text-[#79c0ff]" />
           </div>
           <div>
-            <h3 className="font-semibold text-xs text-slate-900 tracking-tight">Chat Copilot</h3>
-            <p className="text-[10px] text-slate-500">Context-Aware AI Assistant</p>
+            <h3 className="font-semibold text-xs text-[#1f2328] tracking-tight">Copilot</h3>
+            <p className="text-[10px] text-[#656d76]">Repository Architecture AI</p>
           </div>
         </div>
 
-        {selectedId ? (
-          <div className="flex items-center space-x-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200/80 rounded-full text-xs text-amber-900 animate-in fade-in">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-            <span className="font-mono text-[11px] font-medium max-w-[120px] truncate">{selectedId}</span>
+        <div className="flex items-center space-x-1.5 min-w-0">
+          {onClose && (
             <button
-              onClick={onSelectionClear}
-              className="text-amber-700 hover:text-amber-900 p-0.5 rounded-full"
-              title="Clear selection"
+              type="button"
+              onClick={onClose}
+              title="Collapse Copilot (⌘I)"
+              className="p-1 rounded-md text-[#656d76] hover:text-[#1f2328] hover:bg-[#eaeef2] transition-colors cursor-pointer shrink-0"
             >
-              <X className="w-3 h-3" />
+              <X className="w-4 h-4" />
             </button>
-          </div>
-        ) : (
-          <span className="text-[11px] text-slate-400 italic">No node selected</span>
-        )}
+          )}
+        </div>
       </div>
+
+      {/* Prominent Sticky Active Context Bar */}
+      {selectedNode ? (
+        <div className="px-3 py-1.5 bg-[#ddf4ff] border-b border-[#54aeff]/30 flex items-center justify-between text-xs animate-in fade-in">
+          <div className="flex items-center space-x-1.5 min-w-0">
+            <FileCode2 className="w-3.5 h-3.5 text-[#0969da] shrink-0" />
+            <span className="font-semibold text-[11px] text-[#1f2328]">Active:</span>
+            <span
+              className="font-mono text-[11px] text-[#0969da] font-medium truncate"
+              title={selectedNode.filePath || selectedNode.label}
+            >
+              {selectedNode.filePath || selectedNode.label}
+            </span>
+            {selectedNode.zone && (
+              <span className="px-1.5 py-0.2 rounded bg-white text-[10px] text-[#0969da] border border-[#54aeff]/40 font-medium shrink-0">
+                {selectedNode.zone}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onSelectionClear}
+            className="text-[#0969da] hover:text-[#0550ae] p-1 rounded-md hover:bg-blue-100/50 cursor-pointer shrink-0"
+            title="Switch back to Entire Repository mode"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ) : (
+        <div className="px-3.5 py-1.5 bg-[#f6f8fa] border-b border-[#d0d7de] flex items-center justify-between text-[11px] text-[#656d76]">
+          <span>Context: Entire Repository</span>
+          <span className="text-[10px] text-[#8c959f]">Click node to scope</span>
+        </div>
+      )}
 
       {/* Message Feed */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/30">
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex flex-col ${
-              msg.role === "user" ? "items-end" : "items-start"
-            }`}
-          >
+          <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
             <div
               className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed shadow-2xs ${
                 msg.role === "user"
                   ? "bg-[#1E293B] text-white rounded-br-xs"
-                  : "bg-white text-slate-800 border border-slate-200/90 rounded-bl-xs"
+                  : msg.isError
+                    ? "bg-red-50 text-red-800 border border-red-200 rounded-bl-xs"
+                    : "bg-white text-slate-800 border border-slate-200/90 rounded-bl-xs"
               }`}
             >
-              <div className="whitespace-pre-wrap font-sans">{msg.content}</div>
+              {msg.role === "user" ? (
+                <div className="whitespace-pre-wrap font-sans">{msg.content}</div>
+              ) : (
+                <div className="flex gap-1.5">
+                  {msg.isError && <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />}
+                  <MarkdownMessage content={msg.content} />
+                </div>
+              )}
 
               {msg.highlightedNodeIds && msg.highlightedNodeIds.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-1">
                   <span className="text-[10px] text-slate-400 font-medium">Highlighted:</span>
-                  {msg.highlightedNodeIds.map((id) => (
-                    <span
-                      key={id}
-                      className="px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded text-[10px] font-mono"
-                    >
-                      {id}
-                    </span>
-                  ))}
+                  {msg.highlightedNodeIds.map((id) => {
+                    const node = registry.byId.get(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => onFocusNode(id, msg.highlightedNodeIds)}
+                        title={node ? `${node.filePath || node.label} (${id})` : id}
+                        className="px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[10px] font-mono cursor-pointer transition-colors"
+                      >
+                        {node?.label || id}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
-            <span className="text-[9px] text-slate-400 mt-1 px-1">{msg.timestamp}</span>
+            {msg.timestamp && (
+              <span className="text-[9px] text-slate-400 mt-1 px-1" suppressHydrationWarning>
+                {msg.timestamp}
+              </span>
+            )}
           </div>
         ))}
 
         {loading && (
-          <div className="flex items-center space-x-2 text-xs text-slate-500 bg-white border border-slate-200 p-2.5 rounded-xl w-fit">
-            <Bot className="w-4 h-4 text-indigo-600 animate-bounce" />
-            <span>Analyzing repository architecture...</span>
+          <div className="flex items-center space-x-2 text-xs text-slate-500 bg-white border border-slate-200 px-3 py-2.5 rounded-2xl rounded-bl-xs w-fit shadow-2xs">
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" />
+            </span>
+            <span>Thinking...</span>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Quick Suggestion Chips */}
-      {selectedId && (
-        <div className="px-4 py-1.5 bg-slate-50/80 border-t border-slate-100 flex items-center space-x-1.5 overflow-x-auto text-[11px]">
-          {quickPrompts.map((prompt) => (
-            <button
-              key={prompt}
-              onClick={() => handleSend(`${prompt} for ${selectedId}`)}
-              className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-600 shrink-0 transition-colors"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Privacy Trust Badge (Pinned Above Input) */}
-      <div className="mx-3 my-2 p-2.5 bg-amber-50/90 border border-amber-300/80 rounded-xl flex items-start space-x-2 shadow-2xs">
-        <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-        <p className="text-[11px] text-amber-900 leading-tight font-medium">
-          🔒 Only the skeleton is sent to the AI — raw business logic never leaves your machine.
-        </p>
+      <div className="px-4 py-1.5 bg-slate-50/80 border-t border-slate-100 flex items-center space-x-1.5 overflow-x-auto text-[11px]">
+        {QUICK_PROMPTS.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            disabled={loading}
+            onClick={() => handleQuickPrompt(prompt)}
+            className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-600 shrink-0 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            {prompt}
+          </button>
+        ))}
       </div>
 
       {/* Input Bar */}
-      <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="p-3 border-t border-slate-200 bg-white">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSend();
+        }}
+        className="p-3 border-t border-[#d0d7de] bg-white"
+      >
+        {selectedNode && (
+          <div className="mb-2 p-1.5 bg-[#ddf4ff] border border-[#54aeff]/40 rounded-md flex items-center justify-between text-xs animate-in fade-in">
+            <div className="flex items-center space-x-1.5 min-w-0">
+              <FileCode2 className="w-3.5 h-3.5 text-[#0969da] shrink-0" />
+              <span className="font-semibold text-[11px] text-[#1f2328]">Scoped to:</span>
+              <span
+                className="font-mono text-[11px] text-[#0969da] font-medium truncate"
+                title={selectedNode.filePath || selectedNode.label}
+              >
+                {selectedNode.filePath || selectedNode.label}
+              </span>
+              {selectedNode.zone && (
+                <span className="px-1.5 py-0.2 rounded bg-white text-[10px] text-[#0969da] border border-[#54aeff]/40 shrink-0">
+                  {selectedNode.zone}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onSelectionClear}
+              title="Clear file context (Entire Repository mode)"
+              className="text-[#0969da] hover:text-[#0550ae] p-0.5 rounded cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="relative flex items-center">
           <input
             type="text"
             placeholder={
-              selectedId
-                ? `Ask about ${selectedId}...`
-                : "Ask about repository architecture or flow..."
+              selectedNode
+                ? `Ask about ${selectedNode.label} (e.g., "What breaks if I change this?")...`
+                : "Ask anything about this repository..."
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={loading}
-            className="w-full pl-3.5 pr-10 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white text-slate-800 placeholder-slate-400 transition-all shadow-2xs"
+            className="w-full pl-3 pr-10 py-2 text-xs bg-[#f6f8fa] border border-[#d0d7de] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0969da] focus:bg-white text-[#1f2328] placeholder-[#656d76] transition-all shadow-2xs font-sans"
           />
           <button
             type="submit"
             disabled={!input.trim() || loading}
-            className="absolute right-1.5 p-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg transition-colors cursor-pointer"
+            className="absolute right-1.5 p-1 bg-[#1f2328] hover:bg-[#24292f] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-md transition-colors cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />
           </button>

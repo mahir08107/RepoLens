@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { ArchitectureMap, RepoSkeleton, ZoneCategory } from '../../shared/types';
-import app from './index';
+import { ArchitectureMap, MapEdge, MapNode, RepoSkeleton, ZoneCategory } from '../../shared/types.js';
+import app from './index.js';
 
 dotenv.config();
 
@@ -241,7 +241,7 @@ async function runIntegrationSuite() {
   // ----------------------------------------------------
   let check4Passed = true;
   let check4Details = '';
-  const nodeIds = new Set(coldMap?.nodes?.map((n) => n.id) || []);
+  const nodeIds = new Set(coldMap?.nodes?.map((n: MapNode) => n.id) || []);
   const brokenEdges: string[] = [];
   const selfLoops: string[] = [];
 
@@ -312,7 +312,7 @@ async function runIntegrationSuite() {
   if (coldMap && coldMap.nodes) {
     console.log('\n--- Generated ArchitectureMap Nodes ---');
     console.table(
-      coldMap.nodes.map((n) => ({
+      coldMap.nodes.map((n: MapNode) => ({
         ID: n.id,
         Label: n.label,
         Zone: n.zone,
@@ -323,7 +323,7 @@ async function runIntegrationSuite() {
 
     console.log('\n--- Inferred ArchitectureMap Edges ---');
     console.table(
-      coldMap.edges.map((e) => ({
+      coldMap.edges.map((e: MapEdge) => ({
         ID: e.id,
         Source: e.source,
         Target: e.target,
@@ -345,4 +345,3 @@ async function runIntegrationSuite() {
 }
 
 runIntegrationSuite();
-

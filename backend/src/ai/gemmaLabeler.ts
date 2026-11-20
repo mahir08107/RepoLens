@@ -52,16 +52,14 @@ export async function labelModulesWithGemma(files: FileSkeleton[]): Promise<Labe
   const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
   // Priority model sequence:
-  // User configurable via GEMMA_MODEL_NAME, defaulting to 'gemma-3-4b-it'.
-  // If the model is not found or unavailable (503 high demand), fallback to other Gemma models or Gemini.
-  const configuredModel = process.env.GEMMA_MODEL_NAME || 'gemma-3-4b-it';
+  // Prefer 'gemini-3.5-flash-lite' for high availability and low latency.
+  const configuredModel = process.env.GEMMA_MODEL_NAME || 'gemini-3.5-flash-lite';
   const candidateModels = Array.from(
     new Set([
+      'gemini-3.5-flash-lite',
       configuredModel,
-      'gemma-3-4b-it',
-      'gemma-4b',
-      'gemma-4-26b-a4b-it',
       'gemini-2.5-flash-lite',
+      'gemini-2.5-flash',
     ])
   );
 

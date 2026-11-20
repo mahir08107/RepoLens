@@ -1,7 +1,7 @@
 // app/api/diagram/route.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import type { RepoSkeleton } from "@/shared/types";
+import type { ArchitectureMap, RepoSkeleton } from "@/shared/types";
 import {
   parseGitHubRepoUrl,
   fetchLatestCommitSha,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/ast-parser";
 import { generateMermaidDiagram, convertArchitectureMapToMermaid } from "@/lib/diagram-generator";
 import { GoogleGenAI } from "@google/genai";
+import { API_BASE_URL } from "@/lib/api-config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,17 +49,19 @@ export async function POST(request: NextRequest) {
     let mermaidDefinition = algorithmicResult.mermaidDefinition;
     let groupColors = algorithmicResult.groupColors;
     let entryNodeId = algorithmicResult.entryNodeId;
+    let architectureMap: ArchitectureMap | null = null;
 
-    // Step 2: Try Cloud Run Backend (Gemma 4B + Gemini Flash Lite + Firestore caching)
-    const backendUrl =
-      process.env.VITE_API_BASE_URL ||
-      process.env.NEXT_PUBLIC_API_BASE_URL ||
-      "https://repolens-backend-499932337342.asia-south1.run.app";
+    // Step 2: Try Cloud Run Backend (Gemma 4B / Gemini Flash + Firestore caching)
+    const backendUrl = API_BASE_URL;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
       const backendRes = await fetch(`${backendUrl}/api/generate-map`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           repoUrl: skeleton.repoUrl,
           commitSha: skeleton.commitSha,
@@ -67,10 +70,13 @@ export async function POST(request: NextRequest) {
         }),
       });
 
+      clearTimeout(timeoutId);
+
       if (backendRes.ok) {
         const backendMap = await backendRes.json();
         // If Cloud Run returned AI-classified nodes and edges, convert them to Mermaid
         if (Array.isArray(backendMap?.nodes) && backendMap.nodes.length > 0) {
+          architectureMap = backendMap as ArchitectureMap;
           const converted = convertArchitectureMapToMermaid(backendMap, skeleton);
           if (converted.mermaidDefinition) {
             mermaidDefinition = converted.mermaidDefinition;
@@ -131,11 +137,16 @@ CRITICAL REQUIREMENTS FOR DETAILED FOLDER REPRESENTATION:
 5. NEVER draw criss-crossing diagonal arrows from every individual file to shared/types.ts.
 6. Output ONLY raw Mermaid syntax starting with "flowchart LR" without markdown fences.`;
 
-        const geminiResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+        const geminiPromise = ai.models.generateContent({
+          model: "gemini-3.5-flash-lite",
           contents: prompt,
         });
 
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Gemini diagram generation timed out")), 10000)
+        );
+
+        const geminiResponse = await Promise.race([geminiPromise, timeoutPromise]);
         const text = geminiResponse.text?.trim() || "";
         const cleanMermaid = text
           .replace(/^```mermaid\s*/i, "")
@@ -160,6 +171,7 @@ CRITICAL REQUIREMENTS FOR DETAILED FOLDER REPRESENTATION:
       groupColors,
       skeleton,
       entryNodeId,
+      architectureMap,
     });
   } catch (e: any) {
     console.error("Diagram route error:", e);

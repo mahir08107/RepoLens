@@ -291,6 +291,36 @@ function getFolderCategory(filePath: string): {
 }
 
 /**
+ * Strips parentheses, parameters, return types, export/async keywords,
+ * and quotes from function signature strings to isolate just the safe function name.
+ */
+function cleanFunc(s: string): string {
+  if (!s) return "";
+  return s
+    .split("(")[0]
+    .replace(/^async\s+/, "")
+    .replace(/^(export\s+)?(function\s+|const\s+|class\s+|let\s+|var\s+)/, "")
+    .replace(/[^a-zA-Z0-9_$]/g, "")
+    .trim();
+}
+
+/**
+ * Sanitizes arbitrary text so it can safely be embedded in Mermaid node labels
+ * and subgraph titles without breaking Mermaid's flowchart parser.
+ */
+export function sanitizeMermaidText(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/"/g, "'")
+    .replace(/`/g, "'")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .replace(/\[/g, "&#91;")
+    .replace(/\]/g, "&#93;")
+    .trim();
+}
+
+/**
  * Infer human-friendly role purpose and capabilities for a file.
  */
 function inferFileDetails(file: FileSkeleton): {
@@ -325,46 +355,47 @@ function inferFileDetails(file: FileSkeleton): {
   // IoT / Sensor / Circuit / Vanilla JS apps (e.g. shristi-circuittech)
   if (nameLower.includes("dashboard")) {
     const hasThingSpeak = file.functionSignatures?.some((s) => s.toLowerCase().includes("thingspeak"));
+    const funcs = (file.functionSignatures || []).map(cleanFunc).filter(Boolean);
     return {
       icon: "📊",
       purpose: hasThingSpeak ? "Real-time circuit telemetry & IoT monitoring" : "User dashboard & activity view",
-      capabilities: file.functionSignatures?.length ? file.functionSignatures.slice(0, 2).join(", ") : "renderDashboard()",
+      capabilities: funcs.length ? funcs.slice(0, 2).map((f) => `${f}()`).join(", ") : "renderDashboard()",
     };
   }
   if (nameLower.includes("auth")) {
+    const exps = (file.exports || []).map(cleanFunc).filter(Boolean);
     return {
       icon: "🔐",
       purpose: "Firebase authentication & user state observer",
-      capabilities: file.exports?.length ? file.exports.slice(0, 2).join(", ") : "watchAuth, getCurrentUser",
+      capabilities: exps.length ? exps.slice(0, 2).join(", ") : "watchAuth, getCurrentUser",
     };
   }
   if (nameLower.includes("login")) {
+    const funcs = (file.functionSignatures || []).map(cleanFunc).filter(Boolean);
     return {
       icon: "🔑",
       purpose: "User authentication form & login controller",
-      capabilities: file.functionSignatures?.length ? file.functionSignatures.slice(0, 2).join(", ") : "handleLogin()",
+      capabilities: funcs.length ? funcs.slice(0, 2).map((f) => `${f}()`).join(", ") : "handleLogin()",
     };
   }
   if (nameLower.includes("firebase")) {
+    const exps = (file.exports || []).map(cleanFunc).filter(Boolean);
     return {
       icon: "🔥",
       purpose: "Firebase SDK initialization & credentials config",
-      capabilities: file.exports?.length ? file.exports.slice(0, 2).join(", ") : "firebaseConfig",
+      capabilities: exps.length ? exps.slice(0, 2).join(", ") : "firebaseConfig",
     };
   }
 
   // Generic heuristic detection
-  const keyExports = (file.exports || []).slice(0, 2);
-  const keyFuncs = (file.functionSignatures || [])
-    .map((s) => s.split("(")[0].replace(/^async\s+/, "").replace(/^(export\s+)?(function\s+|const\s+|class\s+)/, "").trim())
-    .filter(Boolean)
-    .slice(0, 2);
+  const keyExports = (file.exports || []).map(cleanFunc).filter(Boolean).slice(0, 2);
+  const keyFuncs = (file.functionSignatures || []).map(cleanFunc).filter(Boolean).slice(0, 2);
 
   const capabilities =
     keyExports.length > 0
       ? `Exports: ${keyExports.join(", ")}`
       : keyFuncs.length > 0
-      ? `Func: ${keyFuncs.join("(), ")}()`
+      ? `Func: ${keyFuncs.map((f) => `${f}()`).join(", ")}`
       : "Module exports";
 
   let icon = "📄";
@@ -484,7 +515,7 @@ function generateZoneBasedDiagram(skeleton: RepoSkeleton): {
       `classDef ${classId} fill:${zone.bg},stroke:${zone.border},stroke-width:2px,color:${zone.text};`
     );
 
-    lines.push(`  subgraph ${zone.id} ["<b>${zone.name}</b><br/><small><i>${zone.description}</i></small>"]`);
+    lines.push(`  subgraph ${zone.id} ["<b>${sanitizeMermaidText(zone.name)}</b><br/><small><i>${sanitizeMermaidText(zone.description)}</i></small>"]`);
     lines.push(`    direction TB`);
 
     const nodeIds: string[] = [];
@@ -499,7 +530,7 @@ function generateZoneBasedDiagram(skeleton: RepoSkeleton): {
       const { icon, purpose, capabilities } = inferFileDetails(file);
 
       lines.push(
-        `    ${safeId}["<b>${icon} ${baseName}</b><br/><small>${purpose}</small><br/><small>⚡ <code>${capabilities}</code></small>"]`
+        `    ${safeId}["<b>${icon} ${sanitizeMermaidText(baseName)}</b><br/><small>${sanitizeMermaidText(purpose)}</small><br/><small>⚡ <code>${sanitizeMermaidText(capabilities)}</code></small>"]`
       );
     });
 
@@ -540,7 +571,7 @@ function generateZoneBasedDiagram(skeleton: RepoSkeleton): {
     const key = `${src}->${tgt}`;
     if (!edgesAdded.has(key) && src !== tgt) {
       edgesAdded.add(key);
-      lines.push(`  ${src} ==>|"${label}"| ${tgt}`);
+      lines.push(`  ${src} ==>|"${sanitizeMermaidText(label)}"| ${tgt}`);
     }
   };
 
@@ -678,7 +709,7 @@ function generateFolderBasedDiagram(skeleton: RepoSkeleton): {
       `classDef ${classId} fill:${folder.bg},stroke:${folder.border},stroke-width:2px,color:${folder.text};`
     );
 
-    lines.push(`  subgraph ${folder.id} ["<b>${folder.title}</b><br/><small><i>${folder.description}</i></small>"]`);
+    lines.push(`  subgraph ${folder.id} ["<b>${sanitizeMermaidText(folder.title)}</b><br/><small><i>${sanitizeMermaidText(folder.description)}</i></small>"]`);
     lines.push(`    direction TB`);
 
     const nodeIds: string[] = [];
@@ -697,14 +728,14 @@ function generateFolderBasedDiagram(skeleton: RepoSkeleton): {
       const { icon, purpose, capabilities } = inferFileDetails(file);
 
       lines.push(
-        `    ${safeId}["<b>${icon} ${baseName}</b><br/><small>${purpose}</small><br/><small>⚡ <code>${capabilities}</code></small>"]`
+        `    ${safeId}["<b>${icon} ${sanitizeMermaidText(baseName)}</b><br/><small>${sanitizeMermaidText(purpose)}</small><br/><small>⚡ <code>${sanitizeMermaidText(capabilities)}</code></small>"]`
       );
     });
 
     if (remainingFiles.length > 0) {
       const moreId = `${folder.id}_more`;
       nodeIds.push(moreId);
-      const sampleNames = remainingFiles.slice(0, 2).map((f) => f.filePath.split("/").pop()).join(", ");
+      const sampleNames = remainingFiles.slice(0, 2).map((f) => sanitizeMermaidText(f.filePath.split("/").pop() || "")).join(", ");
       lines.push(
         `    ${moreId}["<small>📦 +${remainingFiles.length} more files (${sampleNames}...)</small>"]`
       );
@@ -826,7 +857,7 @@ export function convertArchitectureMapToMermaid(
 
       const baseName = node.filePath.split("/").pop() || node.filePath;
       lines.push(
-        `    ${safeId}["<b>📄 ${baseName}</b><br/><small>${node.summary || node.label}</small>"]`
+        `    ${safeId}["<b>📄 ${sanitizeMermaidText(baseName)}</b><br/><small>${sanitizeMermaidText(node.summary || node.label)}</small>"]`
       );
     });
 
@@ -839,7 +870,7 @@ export function convertArchitectureMapToMermaid(
     const srcId = `node_${edge.source.replace(/[^a-zA-Z0-9_]/g, "_")}`;
     const tgtId = `node_${edge.target.replace(/[^a-zA-Z0-9_]/g, "_")}`;
     const relation = edge.relation || "depends on";
-    lines.push(`  ${srcId} ==>|"${relation}"| ${tgtId}`);
+    lines.push(`  ${srcId} ==>|"${sanitizeMermaidText(relation)}"| ${tgtId}`);
   });
 
   lines.push("");
