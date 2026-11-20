@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
-import { ArchitectureMap, ChatRequest, ChatResponse, MapNode } from '../../../shared/types';
+import { ArchitectureMap, ChatRequest, ChatResponse, MapNode } from '../../../shared/types.js';
 
 dotenv.config();
 
@@ -138,4 +138,3 @@ Do NOT include markdown fences, conversational prefix/suffix, or code blocks. Pu
     };
   }
 }
-

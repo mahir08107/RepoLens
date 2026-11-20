@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { ArchitectureMap, RepoSkeleton, ZoneCategory } from '../../shared/types';
-import app from './index';
+import { ArchitectureMap, RepoSkeleton, ZoneCategory } from '../../shared/types.js';
+import app from './index.js';
 
 dotenv.config();
 
@@ -279,7 +279,6 @@ async function runIntegrationSuite() {
   let check5Details = '';
 
   if (warmRun.status === 200 && warmMap && warmMap.cached === true) {
-    const isUnderThreshold = warmRun.durationMs < 500;
     const sameNodesCount = warmMap.nodes.length === coldMap.nodes.length;
     const sameEdgesCount = warmMap.edges.length === coldMap.edges.length;
 
@@ -345,4 +344,3 @@ async function runIntegrationSuite() {
 }
 
 runIntegrationSuite();
-
