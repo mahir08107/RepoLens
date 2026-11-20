@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { ChatRequest, ChatResponse } from "@/shared/types";
-import { API_BASE_URL } from "@/lib/api-config";
+import { getBackendUrl } from "@/lib/api-config";
 import { GoogleGenAI } from "@google/genai";
 
 export async function POST(request: NextRequest) {
@@ -24,15 +24,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const backendUrl = API_BASE_URL;
+    const backendUrl = getBackendUrl();
 
-    // 1. Try remote or local Express backend (/api/chat)
+    // 1. Try bound Vercel service or local Express backend (/api/chat)
     if (backendUrl) {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-        const backendRes = await fetch(`${backendUrl}/api/chat`, {
+        const backendRes = await fetch(new URL("/api/chat", backendUrl), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

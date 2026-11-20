@@ -22,3 +22,18 @@ export const API_BASE_URL: string = (() => {
   // route through the local Next.js API route (/api) so browser CORS and 503 errors never break the UI.
   return "";
 })();
+
+/**
+ * Runtime resolver for server-side Next.js Route Handlers.
+ * Prioritizes Vercel's injected service binding (`process.env.BACKEND_URL`) at request time
+ * before falling back to configured API_BASE_URL.
+ */
+export function getBackendUrl(): string {
+  if (typeof process !== "undefined" && process.env) {
+    const bound = process.env.BACKEND_URL;
+    if (bound && bound.trim().length > 0) {
+      return bound.replace(/\/+$/, "");
+    }
+  }
+  return API_BASE_URL;
+}
