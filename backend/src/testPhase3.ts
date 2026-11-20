@@ -1,9 +1,6 @@
-import dotenv from 'dotenv';
-import { ArchitectureMap, RepoSkeleton } from '../../shared/types';
-import { saveCachedMap } from './db/firestoreCache';
-import app from './index';
-
-dotenv.config();
+import { ArchitectureMap, RepoSkeleton } from '../../shared/types.js';
+import { saveCachedMap } from './db/firestoreCache.js';
+import app from './index.js';
 
 // Realistic demo-shop skeleton
 const demoRepo: RepoSkeleton = {
@@ -283,4 +280,3 @@ async function runPhase3Tests() {
 }
 
 runPhase3Tests();
-

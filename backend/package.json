@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "description": "RepoLens Backend Service",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/backend/src/index.js",
   "scripts": {
-    "test:phase1": "tsx src/testPhase1.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/backend/src/index.js",
+    "test:phase1": "tsx src/testPhase1.ts",
+    "test:phase2": "tsx src/testPhase2.ts",
+    "test:phase3": "tsx src/testPhase3.ts",
+    "test:integration": "tsx src/testIntegration.ts"
   },
   "dependencies": {
     "@google/genai": "^3.6.1",
