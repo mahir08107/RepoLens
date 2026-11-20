@@ -134,8 +134,8 @@ export default function FeedbackPage() {
         formData.append('screenshots', item.file, item.file.name);
       });
 
-      const backendUrl = API_BASE_URL || 'http://localhost:8080';
-      const res = await fetch(`${backendUrl}/api/feedback`, {
+      const feedbackUrl = API_BASE_URL ? `${API_BASE_URL}/api/feedback` : '/api/feedback';
+      const res = await fetch(feedbackUrl, {
         method: 'POST',
         body: formData,
       });

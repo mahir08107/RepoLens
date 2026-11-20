@@ -11,7 +11,7 @@ import {
 } from "@/lib/ast-parser";
 import { generateMermaidDiagram, convertArchitectureMapToMermaid } from "@/lib/diagram-generator";
 import { GoogleGenAI } from "@google/genai";
-import { API_BASE_URL } from "@/lib/api-config";
+import { getBackendUrl } from "@/lib/api-config";
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,14 +51,15 @@ export async function POST(request: NextRequest) {
     let entryNodeId = algorithmicResult.entryNodeId;
     let architectureMap: ArchitectureMap | null = null;
 
-    // Step 2: Try Cloud Run Backend (Gemma 4B / Gemini Flash + Firestore caching)
-    const backendUrl = API_BASE_URL;
+    // Step 2: Try bound Vercel service or local Express Backend (/api/generate-map)
+    const backendUrl = getBackendUrl();
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+    if (backendUrl) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-      const backendRes = await fetch(`${backendUrl}/api/generate-map`, {
+        const backendRes = await fetch(new URL("/api/generate-map", backendUrl), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
@@ -92,8 +93,9 @@ export async function POST(request: NextRequest) {
           mermaidDefinition = backendMap.mermaidDefinition;
         }
       }
-    } catch (backendErr: any) {
-      console.warn("Cloud Run backend /api/generate-map notice:", backendErr.message);
+      } catch (backendErr: any) {
+        console.warn("Backend /api/generate-map notice:", backendErr.message);
+      }
     }
 
     // Step 3: If GEMINI_API_KEY is available locally, use Gemini 2.5 Flash for enhanced architecture modeling
