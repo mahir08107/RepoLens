@@ -34,9 +34,7 @@ export async function parseFiles(
 ): Promise<RepoSkeleton> {
   // Dynamically import the worker – this works in Next.js because the worker
   // file is compiled to a separate bundle.
-  const WorkerCtor = (await import("./ast-worker"))
-    .default as typeof Worker;
-  const worker = new WorkerCtor(new URL("./ast-worker.ts", import.meta.url), {
+  const worker = new Worker(new URL("./ast-worker.ts", import.meta.url), {
     type: "module",
   });
 
