@@ -192,7 +192,7 @@ mapRouter.post(['/generate-map', '/diagram'], async (req: Request, res: Response
     }
 
     // Normalize each file into a clean FileSkeleton structure
-    const files: FileSkeleton[] = (Array.isArray(rawFiles) ? rawFiles : []).map((f: any, idx: number) => {
+    let files: FileSkeleton[] = (Array.isArray(rawFiles) ? rawFiles : []).map((f: any, idx: number) => {
       if (typeof f === 'string') {
         return { filePath: f, imports: [], exports: [], functionSignatures: [] };
       }
@@ -203,6 +203,66 @@ mapRouter.post(['/generate-map', '/diagram'], async (req: Request, res: Response
         functionSignatures: Array.isArray(f.functionSignatures) ? f.functionSignatures : [],
       };
     });
+
+    // If client sent 0 files (e.g. client AST timeout or network glitch), attempt direct server-side tree fetch
+    if (files.length === 0 && repoUrl && repoUrl.includes('github.com')) {
+      try {
+        const cleanUrl = repoUrl.trim().replace(/\.git$/, '');
+        const parsedUrl = new URL(cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`);
+        const segments = parsedUrl.pathname.split('/').filter(Boolean);
+        if (segments.length >= 2) {
+          const owner = segments[0];
+          const repo = segments[1];
+          const ghHeaders: Record<string, string> = {
+            Accept: 'application/vnd.github.v3+json',
+            'User-Agent': 'RepoLens-Backend',
+          };
+          if (process.env.GITHUB_TOKEN) {
+            ghHeaders['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+          }
+
+          let targetSha = commitSha;
+          if (!targetSha || targetSha === 'latest' || targetSha === 'unknown') {
+            const commitRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/HEAD`, {
+              headers: ghHeaders,
+            });
+            if (commitRes.ok) {
+              const cData: any = await commitRes.json().catch(() => null);
+              if (cData?.sha) targetSha = cData.sha;
+            }
+          }
+
+          if (targetSha && targetSha !== 'latest' && targetSha !== 'unknown') {
+            const treeRes = await fetch(
+              `https://api.github.com/repos/${owner}/${repo}/git/trees/${targetSha}?recursive=1`,
+              { headers: ghHeaders }
+            );
+            if (treeRes.ok) {
+              const tData: any = await treeRes.json().catch(() => null);
+              if (Array.isArray(tData?.tree)) {
+                for (const item of tData.tree) {
+                  if (item.type === 'blob' && typeof item.path === 'string') {
+                    const lower = item.path.toLowerCase();
+                    const excluded = ['node_modules/', '.git/', 'dist/', 'build/'].some((s) => lower.includes(s));
+                    if (!excluded) {
+                      files.push({
+                        filePath: item.path,
+                        imports: [],
+                        exports: [],
+                        functionSignatures: [],
+                      });
+                      if (files.length >= 35) break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (ghFetchErr: any) {
+        console.warn('[mapRoute] Server GitHub tree fallback notice:', ghFetchErr?.message);
+      }
+    }
 
     const skeleton: RepoSkeleton = {
       repoUrl,

@@ -192,12 +192,14 @@ export default function DashboardWorkspace() {
 
     try {
       let extractedSkeleton: RepoSkeleton | null = null;
+      let clientAstError: string | null = null;
+
       try {
         const token = githubAccessToken || undefined;
         extractedSkeleton = await Promise.race([
           parseRepo(url, token),
           new Promise<null>((_, reject) =>
-            setTimeout(() => reject(new Error("Client AST parse timeout")), 10000)
+            setTimeout(() => reject(new Error("Client AST parse timeout")), 12000)
           ),
         ]);
         if (extractedSkeleton) {
@@ -207,7 +209,16 @@ export default function DashboardWorkspace() {
           }
         }
       } catch (astErr: any) {
-        console.warn("Client AST parsing notice (proceeding with server diagram generation):", astErr.message);
+        console.warn("Client AST parsing notice:", astErr.message);
+        clientAstError = astErr.message;
+        // Surface critical actionable errors immediately without masking
+        if (
+          astErr.message.includes("rate limit reached") ||
+          astErr.message.includes("Repository not found") ||
+          astErr.message.includes("Repository appears to be empty")
+        ) {
+          throw astErr;
+        }
       }
 
       setStatusText("Generating architecture map...");
@@ -302,6 +313,7 @@ export default function DashboardWorkspace() {
       } else {
         throw new Error(
           (data && typeof data === "object" && data.error) ||
+            clientAstError ||
             "Could not parse repository files. Please verify the repository URL."
         );
       }

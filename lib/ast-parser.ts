@@ -6,6 +6,7 @@
  */
 
 import type { RepoSkeleton, FileSkeleton } from "../shared/types";
+import { githubApiFetch, fetchRawFileContent } from "@/frontend/src/services/githubService";
 
 export type { RepoSkeleton, FileSkeleton };
 
@@ -56,22 +57,9 @@ export function shouldIncludeFile(path: string): boolean {
  * 1. Fetch the default branch's latest commit SHA via GET /repos/{owner}/{repo}/commits/HEAD
  */
 export async function fetchLatestCommitSha(owner: string, repo: string, token?: string): Promise<string> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github.v3+json",
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
+  const res = await githubApiFetch(`https://api.github.com/repos/${owner}/${repo}/commits/HEAD`, token);
 
-  const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/HEAD`, {
-    headers,
-  });
-
-  if (!res.ok) {
-    throw new Error(`GitHub commits lookup failed (${res.status}): ${res.statusText}`);
-  }
-
-  const data = await res.json();
+  const data = await res.json().catch(() => null);
   if (!data?.sha) {
     throw new Error("Could not find commit SHA in GitHub commits/HEAD response");
   }
@@ -81,8 +69,7 @@ export async function fetchLatestCommitSha(owner: string, repo: string, token?: 
 
 /**
  * 2. Fetch the recursive file tree via GET /repos/{owner}/{repo}/git/trees/{commitSha}?recursive=1
- * Filters blobs ending with .js, .ts, .tsx, .jsx, .py, excludes test/tests/examples/benchmarks/node_modules/dist,
- * does NOT restrict to src/, and caps at 30 files.
+ * Filters source and config files, excludes dependencies and builds, and caps at 35 files.
  */
 export async function fetchFilteredFileTree(
   owner: string,
@@ -90,24 +77,17 @@ export async function fetchFilteredFileTree(
   commitSha: string,
   token?: string
 ): Promise<string[]> {
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github.v3+json",
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(
+  const res = await githubApiFetch(
     `https://api.github.com/repos/${owner}/${repo}/git/trees/${commitSha}?recursive=1`,
-    { headers }
+    token
   );
 
-  if (!res.ok) {
-    throw new Error(`GitHub recursive tree fetch failed (${res.status}): ${res.statusText}`);
-  }
-
-  const data = await res.json();
+  const data = await res.json().catch(() => null);
   const tree = Array.isArray(data?.tree) ? data.tree : [];
+
+  if (tree.length === 0) {
+    throw new Error("Repository appears to be empty.");
+  }
 
   const matchedPaths: string[] = [];
   for (const item of tree) {
@@ -138,11 +118,16 @@ export async function fetchFilteredFileTree(
     }
   }
 
+  if (matchedPaths.length === 0) {
+    throw new Error("Repository appears to be empty.");
+  }
+
   return matchedPaths;
 }
 
 /**
  * Fetches raw source code contents for a list of file paths.
+ * Uses raw.githubusercontent.com when unauthenticated to avoid exhausting the 60 req/hr rate limit.
  */
 export async function fetchFileContents(
   owner: string,
@@ -155,24 +140,9 @@ export async function fetchFileContents(
 
   const fetchPromises = filePaths.map(async (filePath) => {
     try {
-      if (token) {
-        const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
-        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}?ref=${commitSha}`;
-        const res = await fetch(apiUrl, {
-          headers: {
-            Accept: "application/vnd.github.raw+json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (res.ok) {
-          fileMap[filePath] = await res.text();
-        }
-      } else {
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${commitSha}/${filePath}`;
-        const res = await fetch(rawUrl);
-        if (res.ok) {
-          fileMap[filePath] = await res.text();
-        }
+      const content = await fetchRawFileContent(owner, repo, commitSha, filePath, token);
+      if (content !== null) {
+        fileMap[filePath] = content;
       }
     } catch (e) {
       console.warn(`Failed to fetch raw file ${filePath}:`, e);

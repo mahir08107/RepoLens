@@ -178,10 +178,12 @@ export async function signOutUser(): Promise<void> {
  */
 export function getStoredGitHubToken(): string | null {
   if (typeof window !== 'undefined' && window.sessionStorage) {
-    return (
+    const token =
       window.sessionStorage.getItem(GITHUB_TOKEN_STORAGE_KEY) ||
-      window.sessionStorage.getItem('repolens_github_token')
-    );
+      window.sessionStorage.getItem('repolens_github_token');
+    if (token && token !== 'undefined' && token !== 'null' && token.trim().length > 0) {
+      return token.trim();
+    }
   }
   return null;
 }
@@ -191,7 +193,10 @@ export function getStoredGitHubToken(): string | null {
  */
 export function getStoredGitHubUsername(): string | null {
   if (typeof window !== 'undefined' && window.sessionStorage) {
-    return window.sessionStorage.getItem(GITHUB_USER_STORAGE_KEY);
+    const u = window.sessionStorage.getItem(GITHUB_USER_STORAGE_KEY);
+    if (u && u !== 'undefined' && u !== 'null' && u.trim().length > 0) {
+      return u.trim();
+    }
   }
   return null;
 }
@@ -200,16 +205,28 @@ export function getStoredGitHubUsername(): string | null {
  * Fetches the authenticated user's public & private GitHub repositories strictly client-side.
  */
 export async function fetchUserRepositories(token: string): Promise<GitHubRepoItem[]> {
+  if (!token || token === 'undefined' || token === 'null') {
+    return [];
+  }
+
   const res = await fetch(
     'https://api.github.com/user/repos?sort=updated&per_page=50&affiliation=owner,collaborator,organization_member',
     {
       headers: {
         Accept: 'application/vnd.github.v3+json',
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${token.trim()}`,
       },
     }
   );
+
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.removeItem(GITHUB_TOKEN_STORAGE_KEY);
+        window.sessionStorage.removeItem(GITHUB_USER_STORAGE_KEY);
+        window.sessionStorage.removeItem('repolens_github_token');
+      }
+    }
     throw new Error(`Failed to load repositories (${res.status})`);
   }
   return res.json();

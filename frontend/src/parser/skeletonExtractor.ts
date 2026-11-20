@@ -10,37 +10,59 @@ const getTreeSitter = () => (typeof window !== "undefined" ? (window as any).Tre
 import type { RepoSkeleton, FileSkeleton } from "@/shared/types";
 
 /** Regex fallbacks for quick extraction when Tree‑sitter is unavailable */
-const FALLBACK_REGEX = {
+const FALLBACK_REGEX: Record<string, Record<string, RegExp>> = {
   imports: {
-    ts: /import\s+[^'\"]+['\"]([^'\"]+)['\"]/g,
-    js: /import\s+[^'\"]+['\"]([^'\"]+)['\"]/g,
-    py: /^(?:import|from)\s+([\w\.]+)/gm,
-    go: /import\s+\(?\s*"([^"]+)"/g,
-    java: /import\s+([\w\.]+);/g,
+    ts: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    js: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    tsx: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    jsx: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    py: /^(?:from|import)\s+([a-zA-Z0-9_.]+)/gm,
+    go: /import\s+(?:\(\s*([^)]+)\s*\)|"([^"]+)")/g,
+    java: /import\s+(?:static\s+)?([a-zA-Z0-9_.*]+);/g,
+    cs: /using\s+([a-zA-Z0-9_.]+);/g,
+    cpp: /#include\s+[<"]([^>"]+)[>"]/g,
+    c: /#include\s+[<"]([^>"]+)[>"]/g,
   },
   exports: {
-    ts: /export\s+(?:const|let|var|function|class)\s+(\w+)/g,
-    js: /export\s+(?:const|let|var|function|class)\s+(\w+)/g,
-    py: /^(?:def|class)\s+(\w+)/gm,
-    go: /func\s+(\w+)\s*\(/g,
-    java: /public\s+(?:class|interface|enum|\w+)\s+(\w+)/g,
+    ts: /export\s+(?:const|let|var|function|class|type|interface)\s+([a-zA-Z0-9_$]+)/g,
+    js: /export\s+(?:const|let|var|function|class)\s+([a-zA-Z0-9_$]+)/g,
+    tsx: /export\s+(?:const|let|var|function|class|type|interface)\s+([a-zA-Z0-9_$]+)/g,
+    jsx: /export\s+(?:const|let|var|function|class)\s+([a-zA-Z0-9_$]+)/g,
+    py: /^(?:def|class)\s+([a-zA-Z0-9_]+)/gm,
+    go: /func\s+([a-zA-Z0-9_]+)\s*\(/g,
+    java: /(?:public|protected)\s+(?:class|interface|enum)\s+([a-zA-Z0-9_]+)/g,
+    cs: /(?:public|internal)\s+(?:class|interface|struct)\s+([a-zA-Z0-9_]+)/g,
+    cpp: /class\s+([a-zA-Z0-9_]+)/g,
+    c: /typedef\s+struct\s+([a-zA-Z0-9_]+)/g,
   },
   functions: {
-    ts: /function\s+(\w+)\s*\(([^)]*)\)/g,
-    js: /function\s+(\w+)\s*\(([^)]*)\)/g,
-    py: /^def\s+(\w+)\s*\(([^)]*)\)/gm,
-    go: /func\s+(\w+)\s*\(([^)]*)\)/g,
-    java: /(?:public|private|protected)\s+\w+\s+(\w+)\s*\(([^)]*)\)\s*\{/g,
+    ts: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    js: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    tsx: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    jsx: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    py: /^def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/gm,
+    go: /func\s+(?:\([^)]+\)\s*)?([a-zA-Z0-9_]+)\s*\(([^)]*)\)/g,
+    java: /(?:public|private|protected)\s+(?:static\s+)?[\w<>[\],\s]+\s+(\w+)\s*\(([^)]*)\)/g,
+    cs: /(?:public|private|protected|internal)\s+(?:static\s+)?[\w<>[\],\s]+\s+(\w+)\s*\(([^)]*)\)/g,
+    cpp: /[\w:*&<>]+\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/g,
+    c: /[\w:*&]+\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/g,
   },
 };
 
 /** Helper to run a regex globally and capture group 1 */
-function runRegex(regex: RegExp, source: string): string[] {
+function runRegex(regex: RegExp | undefined, source: string): string[] {
+  if (!regex) return [];
   const results: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(source)) !== null) {
-    results.push(match[1]);
-  }
+  try {
+    const rx = new RegExp(regex.source, regex.flags);
+    let match: RegExpExecArray | null;
+    while ((match = rx.exec(source)) !== null) {
+      const val = match[1] || match[2] || match[3];
+      if (val && !results.includes(val)) {
+        results.push(val.trim());
+      }
+    }
+  } catch {}
   return results;
 }
 
@@ -51,23 +73,38 @@ function extractFileSkeleton(
   language: string,
   parser?: any
 ): FileSkeleton {
-  // If a TreeSitter parser is provided, we could walk the tree – omitted for brevity.
-  // We'll rely on regex fallback which is sufficient for the hackathon.
-  const imports = runRegex(FALLBACK_REGEX.imports[language] ?? /$^/, source);
-  const exports = runRegex(FALLBACK_REGEX.exports[language] ?? /$^/, source);
-  const funcMatches = [...source.matchAll(FALLBACK_REGEX.functions[language] ?? /$^/g)];
-  const functionSignatures = funcMatches.map((m) => {
-    const name = m[1];
-    const params = m[2].trim().split(/\s*,\s*/).filter(Boolean).join(", ");
-    return `${name}(${params})`;
-  });
+  try {
+    const imports = runRegex(FALLBACK_REGEX.imports[language], source);
+    const exports = runRegex(FALLBACK_REGEX.exports[language], source);
+    const functionSignatures: string[] = [];
 
-  return {
-    filePath: path,
-    imports,
-    exports,
-    functionSignatures,
-  };
+    const funcRegex = FALLBACK_REGEX.functions[language];
+    if (funcRegex) {
+      try {
+        const rx = new RegExp(funcRegex.source, funcRegex.flags);
+        let m: RegExpExecArray | null;
+        while ((m = rx.exec(source)) !== null) {
+          const name = m[1] || m[3] || "anonymous";
+          const params = (m[2] || m[4] || "").trim().replace(/\s+/g, " ");
+          functionSignatures.push(`${name}(${params})`);
+        }
+      } catch {}
+    }
+
+    return {
+      filePath: path,
+      imports,
+      exports,
+      functionSignatures,
+    };
+  } catch {
+    return {
+      filePath: path,
+      imports: [],
+      exports: [],
+      functionSignatures: [],
+    };
+  }
 }
 
 /**
@@ -83,12 +120,27 @@ export async function buildRepoSkeleton(
   const TreeSitter = getTreeSitter();
 
   for (const [path, source] of Object.entries(fileMap)) {
-    const ext = path.split('.').pop() ?? "";
-    const language = ext;
-    const parser = (TreeSitter && languageMap[language]) ? new TreeSitter.Parser() : undefined;
-    if (parser) parser.setLanguage(languageMap[language]);
-    const fileSkeleton = extractFileSkeleton(path, source, language, parser);
-    files.push(fileSkeleton);
+    try {
+      const ext = path.split(".").pop()?.toLowerCase() ?? "";
+      let parser: any = undefined;
+      if (TreeSitter && languageMap && languageMap[ext]) {
+        try {
+          parser = new TreeSitter.Parser();
+          parser.setLanguage(languageMap[ext]);
+        } catch {
+          parser = undefined;
+        }
+      }
+      const fileSkeleton = extractFileSkeleton(path, source, ext, parser);
+      files.push(fileSkeleton);
+    } catch {
+      files.push({
+        filePath: path,
+        imports: [],
+        exports: [],
+        functionSignatures: [],
+      });
+    }
   }
 
   return { repoUrl, commitSha, files };
