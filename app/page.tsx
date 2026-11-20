@@ -1,14 +1,14 @@
 'use client';
 import React, { useState, useCallback, useEffect } from "react";
-import TopBar from "../frontend/src/components/TopBar";
-import MermaidCanvas from "../components/MermaidCanvas";
-import ChatSidebar from "../components/ChatSidebar";
-import PayloadInspector from "../frontend/src/components/privacy/PayloadInspector";
+import dynamic from "next/dynamic";
+import TopBar from "@/frontend/src/components/TopBar";
+import ChatSidebar from "@/components/ChatSidebar";
+import PayloadInspector from "@/frontend/src/components/privacy/PayloadInspector";
 import {
   MOCK_REPO_SKELETON,
   MOCK_MERMAID_DEFINITION,
   MOCK_ZONE_COLORS,
-} from "../frontend/src/mocks/mockData";
+} from "@/frontend/src/mocks/mockData";
 import {
   Compass,
   Layers,
@@ -20,13 +20,30 @@ import {
   Box,
 } from "lucide-react";
 import type { RepoSkeleton } from "@/shared/types";
+import { parseRepo } from "@/lib/ast-parser";
+
+// Dynamic import with ssr: false ensures browser-only execution for Mermaid
+const MermaidCanvas = dynamic(() => import("@/components/MermaidCanvas"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex-1 flex items-center justify-center bg-slate-50 text-slate-400">
+      <div className="animate-pulse text-sm font-medium">Loading architecture canvas...</div>
+    </div>
+  ),
+});
 
 export default function Home() {
   const [skeleton, setSkeleton] = useState<RepoSkeleton | null>(MOCK_REPO_SKELETON);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && MOCK_REPO_SKELETON) {
+      (window as any).__REPO_SKELETON__ = MOCK_REPO_SKELETON;
+    }
+  }, []);
   const [mermaidDef, setMermaidDef] = useState<string>(MOCK_MERMAID_DEFINITION);
   const [legend, setLegend] = useState<Record<string, string>>(MOCK_ZONE_COLORS);
-  const [selectedId, setSelectedId] = useState<string | null>("routes");
-  const [highlightedIds, setHighlightedIds] = useState<string[]>(["routes", "authGuard", "userSvc"]);
+  const [selectedId, setSelectedId] = useState<string | null>("node_app_page");
+  const [highlightedIds, setHighlightedIds] = useState<string[]>(["node_app_page", "node_lib_parser", "node_back_map"]);
   const [loading, setLoading] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -37,43 +54,64 @@ export default function Home() {
     setSkeleton(MOCK_REPO_SKELETON);
     setMermaidDef(MOCK_MERMAID_DEFINITION);
     setLegend(MOCK_ZONE_COLORS);
-    setSelectedId("routes");
-    setHighlightedIds(["routes", "userSvc", "db"]);
+    setSelectedId("node_app_page");
+    setHighlightedIds(["node_app_page", "node_lib_parser", "node_back_map"]);
     setError(null);
   }, []);
 
   const handleGenerate = async (url: string) => {
     setLoading(true);
-    setStatusText("Fetching repo tree...");
+    setStatusText("Fetching repo tree & stripping bodies...");
     setError(null);
 
     try {
-      // Step 1: Call diagram generation endpoint
-      setStatusText("Generating AST & architecture map...");
+      // 1. Client-side AST extraction with privacy preservation
+      let extractedSkeleton: RepoSkeleton | null = null;
+      try {
+        extractedSkeleton = await parseRepo(url);
+        setSkeleton(extractedSkeleton);
+        if (typeof window !== "undefined") {
+          (window as any).__REPO_SKELETON__ = extractedSkeleton;
+        }
+      } catch (astErr: any) {
+        console.warn("Client AST parsing notice:", astErr.message);
+      }
+
+      // 2. Call diagram generation endpoint with repoUrl and extracted skeleton
+      setStatusText("Generating architecture map...");
       const response = await fetch("/api/diagram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoUrl: url }),
+        body: JSON.stringify({ repoUrl: url, skeleton: extractedSkeleton }),
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Diagram generation failed");
 
-      if (data.mermaidDefinition && data.mermaidDefinition.includes("flowchart")) {
+      if (data.mermaidDefinition) {
         setMermaidDef(data.mermaidDefinition);
-      } else {
-        // Use styled diagram with the repo metadata
-        setMermaidDef(MOCK_MERMAID_DEFINITION);
       }
 
-      setLegend(data.groupColors || MOCK_ZONE_COLORS);
-      setSkeleton(data.skeleton || { repoUrl: url, commitSha: "latest", files: [] });
+      if (data.groupColors) {
+        setLegend(data.groupColors);
+      }
+
+      const activeSkeleton = extractedSkeleton || data.skeleton;
+      if (activeSkeleton) {
+        setSkeleton(activeSkeleton);
+        if (typeof window !== "undefined") {
+          (window as any).__REPO_SKELETON__ = activeSkeleton;
+        }
+      }
+
+      // Update selected node to the new repo's entrypoint or first module
+      const firstFile = activeSkeleton?.files?.[0]?.filePath;
+      const newSelectedId = data.entryNodeId || (firstFile ? "node_" + firstFile.replace(/[^a-zA-Z0-9_]/g, "_") : null);
+      setSelectedId(newSelectedId);
+      setHighlightedIds(newSelectedId ? [newSelectedId] : []);
     } catch (e: any) {
-      console.warn("Using fallback interactive architecture for visualization:", e);
-      // Fallback to high-quality interactive demo representation
-      setMermaidDef(MOCK_MERMAID_DEFINITION);
-      setLegend(MOCK_ZONE_COLORS);
-      setError(`Notice: Using demo architecture view (${e.message})`);
+      console.error("Generate error:", e);
+      setError(`Failed to generate representation: ${e.message}`);
     } finally {
       setLoading(false);
       setStatusText("");

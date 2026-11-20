@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { mapRouter } from './routes/mapRoute.js';
-import { chatRouter } from './routes/chatRoute.js';
+import { mapRouter } from './routes/mapRoute';
+import { chatRouter } from './routes/chatRoute';
 
 dotenv.config();
 

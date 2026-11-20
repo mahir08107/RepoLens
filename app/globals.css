@@ -27,16 +27,80 @@
   background: #94A3B8;
 }
 
-/* Mermaid SVG container enhancements */
+/* Mermaid SVG container & clean aesthetics */
 .mermaid-wrapper svg {
   max-width: 100% !important;
   height: auto !important;
   user-select: none;
 }
 
-.highlighted-node {
-  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.75)) !important;
+/* Crisp, readable, non-overlapping edges */
+.mermaid-wrapper svg .edgePath path.path {
+  stroke: #475569 !important;
+  stroke-width: 2px !important;
+  stroke-dasharray: none !important;
+  opacity: 0.9;
+}
+
+.mermaid-wrapper svg .edgePath marker path {
+  fill: #475569 !important;
+  stroke: none !important;
+}
+
+.mermaid-wrapper svg .edgeLabel {
+  background-color: #FFFFFF !important;
+  padding: 3px 8px !important;
+  border-radius: 8px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #1E293B !important;
+  border: 1px solid #CBD5E1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Rounded, elegant subgraph boundaries */
+.mermaid-wrapper svg .cluster rect {
+  rx: 16px !important;
+  ry: 16px !important;
+  stroke-width: 1.5px !important;
+  stroke: #CBD5E1 !important;
+  fill-opacity: 0.25 !important;
+}
+
+.mermaid-wrapper svg .cluster text,
+.mermaid-wrapper svg .cluster .nodeLabel,
+.mermaid-wrapper svg .cluster span {
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  letter-spacing: 0.3px;
+  fill: #1E293B !important;
+  color: #1E293B !important;
+}
+
+/* Node card styling */
+.mermaid-wrapper svg g.node .label {
+  line-height: 1.4 !important;
+  font-size: 12px !important;
+}
+
+.mermaid-wrapper svg g.node rect,
+.mermaid-wrapper svg g.node circle,
+.mermaid-wrapper svg g.node polygon {
+  rx: 10px !important;
+  ry: 10px !important;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.05));
+  transition: all 0.2s ease;
+}
+
+.mermaid-wrapper svg g.node:hover rect {
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+/* Targeted active node highlight - STRICTLY applied only to the selected node shape */
+.mermaid-wrapper svg g.node.highlighted-node > rect,
+.mermaid-wrapper svg g.node.highlighted-node > circle,
+.mermaid-wrapper svg g.node.highlighted-node > polygon {
   stroke: #F59E0B !important;
   stroke-width: 3px !important;
-  stroke-dasharray: 6 3 !important;
+  filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.85)) !important;
 }
