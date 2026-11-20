@@ -17,19 +17,27 @@ function initializeFirestore(): admin.firestore.Firestore | null {
     return db;
   }
 
-  // 1. Check if running on Google Cloud Run or GCP environment with Application Default Credentials (ADC)
-  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
-  const projectId =
-    process.env.GOOGLE_CLOUD_PROJECT ||
-    process.env.FIREBASE_PROJECT_ID ||
-    process.env.GCLOUD_PROJECT;
+  // 0. Vercel / Serverless JSON env credential
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      db = admin.firestore();
+      console.log('[firestoreCache] Connected to Firebase Admin Firestore using FIREBASE_SERVICE_ACCOUNT env.');
+      return db;
+    } catch (err) {
+      console.warn('[firestoreCache] Failed to initialize Firebase Admin with FIREBASE_SERVICE_ACCOUNT:', err);
+    }
+  }
 
+  // 1. Local Dev: If GOOGLE_APPLICATION_CREDENTIALS points to an existing file on disk
   const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   const resolvedCredentialsPath = credentialsPath
     ? (path.isAbsolute(credentialsPath) ? credentialsPath : path.resolve(process.cwd(), credentialsPath))
     : null;
 
-  // Local Dev: If a valid service account file exists on disk, load that credential
   if (resolvedCredentialsPath && fs.existsSync(resolvedCredentialsPath)) {
     try {
       const serviceAccount = JSON.parse(fs.readFileSync(resolvedCredentialsPath, 'utf8'));
@@ -44,22 +52,27 @@ function initializeFirestore(): admin.firestore.Firestore | null {
     }
   }
 
-  // Cloud Run Production or ADC Environment
-  if (isCloudRun || projectId) {
+  // 2. Google Cloud Run ADC (only on Cloud Run, never on Vercel without explicit service account)
+  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION);
+  if (isCloudRun && !process.env.VERCEL) {
     try {
+      const projectId =
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        process.env.FIREBASE_PROJECT_ID ||
+        process.env.GCLOUD_PROJECT;
       admin.initializeApp({
         projectId: projectId || undefined,
       });
       db = admin.firestore();
-      console.log(`[firestoreCache] Connected to Firebase Admin Firestore using Application Default Credentials (ADC)${projectId ? ` [Project: ${projectId}]` : ''}.`);
+      console.log(`[firestoreCache] Connected to Firebase Admin Firestore using Cloud Run ADC${projectId ? ` [Project: ${projectId}]` : ''}.`);
       return db;
     } catch (err) {
       console.warn('[firestoreCache] Failed to initialize Firebase Admin using ADC:', err);
     }
   }
 
-  // Graceful fallback to in-memory cache if no credentials or project is available
-  console.warn('[firestoreCache] Warning: Neither valid serviceAccountKey.json nor Cloud Run ADC environment found. Falling back to local in-memory cache.');
+  // Graceful stateless fallback (e.g., Vercel without FIREBASE_SERVICE_ACCOUNT)
+  console.warn('[Cache] Firestore disabled — running stateless');
   return null;
 }
 
