@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@layer base {
+  * {
+    border-color: #E2E8F0;
+  }
+  body {
+    background-color: #F8FAFC;
+    color: #0F172A;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Mermaid SVG container enhancements */
+.mermaid-wrapper svg {
+  max-width: 100% !important;
+  height: auto !important;
+  user-select: none;
+}
+
+.highlighted-node {
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.75)) !important;
+  stroke: #F59E0B !important;
+  stroke-width: 3px !important;
+  stroke-dasharray: 6 3 !important;
+}
