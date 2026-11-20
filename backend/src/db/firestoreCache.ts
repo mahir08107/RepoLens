@@ -72,24 +72,34 @@ const firestoreDb = initializeFirestore();
 export async function getCachedMap(commitSha: string): Promise<ArchitectureMap | null> {
   if (!commitSha) return null;
 
+  // 1. Check in-memory cache first for instant 0ms retrieval
+  const inMem = inMemoryCache.get(commitSha);
+  if (inMem) return inMem.map;
+
   if (firestoreDb) {
     try {
       const docRef = firestoreDb.collection('architecture_maps').doc(commitSha);
-      const snapshot = await docRef.get();
-      if (snapshot.exists) {
-        const data = snapshot.data();
-        if (data && data.map) {
-          return data.map as ArchitectureMap;
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200));
+      const fetchPromise = (async () => {
+        const snapshot = await docRef.get();
+        if (snapshot.exists) {
+          const data = snapshot.data();
+          if (data && data.map) return data.map as ArchitectureMap;
         }
+        return null;
+      })();
+
+      const result = await Promise.race([fetchPromise, timeoutPromise]);
+      if (result) {
+        inMemoryCache.set(commitSha, { map: result, createdAt: new Date().toISOString() });
+        return result;
       }
     } catch (err) {
       console.warn(`[firestoreCache] Firestore read error for commitSha ${commitSha}:`, err);
     }
   }
 
-  // Fallback to in-memory cache
-  const inMem = inMemoryCache.get(commitSha);
-  return inMem ? inMem.map : null;
+  return null;
 }
 
 /**
@@ -100,19 +110,26 @@ export async function saveCachedMap(commitSha: string, map: ArchitectureMap): Pr
 
   const createdAt = new Date().toISOString();
 
-  // Always keep in-memory cache updated
+  // Always keep in-memory cache updated synchronously
   inMemoryCache.set(commitSha, { map, createdAt });
 
   if (firestoreDb) {
     try {
       const docRef = firestoreDb.collection('architecture_maps').doc(commitSha);
-      await docRef.set({
-        commitSha,
-        repoUrl: map.repoUrl,
-        map,
-        createdAt,
-      });
-      console.log(`[firestoreCache] Saved ArchitectureMap to Firestore under commitSha: ${commitSha}`);
+      // Non-blocking background save to prevent holding up client HTTP response
+      docRef
+        .set({
+          commitSha,
+          repoUrl: map.repoUrl,
+          map,
+          createdAt,
+        })
+        .then(() => {
+          console.log(`[firestoreCache] Saved ArchitectureMap to Firestore under commitSha: ${commitSha}`);
+        })
+        .catch((err) => {
+          console.warn(`[firestoreCache] Firestore write error for commitSha ${commitSha}:`, err?.message || err);
+        });
     } catch (err) {
       console.warn(`[firestoreCache] Firestore write error for commitSha ${commitSha}:`, err);
     }

@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
-import { ArchitectureMap, ChatRequest, RepoSkeleton } from '../../../shared/types';
-import { getCachedMap } from '../db/firestoreCache';
-import { answerArchitectureQuestion } from '../ai/geminiChat';
+import { ArchitectureMap, ChatRequest, RepoSkeleton } from '../../../shared/types.js';
+import { getCachedMap } from '../db/firestoreCache.js';
+import { answerArchitectureQuestion } from '../ai/geminiChat.js';
 
 export const chatRouter = express.Router();
 

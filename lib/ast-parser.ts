@@ -122,17 +122,31 @@ export async function fetchFileContents(
   owner: string,
   repo: string,
   commitSha: string,
-  filePaths: string[]
+  filePaths: string[],
+  token?: string
 ): Promise<Record<string, string>> {
   const fileMap: Record<string, string> = {};
 
   const fetchPromises = filePaths.map(async (filePath) => {
     try {
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${commitSha}/${filePath}`;
-      const res = await fetch(rawUrl);
-      if (res.ok) {
-        const text = await res.text();
-        fileMap[filePath] = text;
+      if (token) {
+        const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}?ref=${commitSha}`;
+        const res = await fetch(apiUrl, {
+          headers: {
+            Accept: "application/vnd.github.raw+json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (res.ok) {
+          fileMap[filePath] = await res.text();
+        }
+      } else {
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${commitSha}/${filePath}`;
+        const res = await fetch(rawUrl);
+        if (res.ok) {
+          fileMap[filePath] = await res.text();
+        }
       }
     } catch (e) {
       console.warn(`Failed to fetch raw file ${filePath}:`, e);
@@ -231,8 +245,8 @@ export async function parseRepo(repoUrl: string, token?: string): Promise<RepoSk
   // 2. Fetch recursive file tree
   const filePaths = await fetchFilteredFileTree(owner, repo, commitSha, token);
 
-  // 3. Fetch file contents
-  const fileMap = await fetchFileContents(owner, repo, commitSha, filePaths);
+  // 3. Fetch file contents (uses authenticated GitHub API when token is present for private repos)
+  const fileMap = await fetchFileContents(owner, repo, commitSha, filePaths, token);
 
   // 4. Strip bodies via AST worker
   const skeleton = await parseFiles(repoUrl, commitSha, fileMap);

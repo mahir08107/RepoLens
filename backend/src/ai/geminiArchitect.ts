@@ -58,8 +58,16 @@ export async function buildArchitectureMap(
   const apiKey = process.env.GEMINI_API_KEY;
   const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
-  // Use process.env.GEMINI_FLASH_MODEL with 'gemini-2.5-flash-lite' as default fallback
-  const modelName = process.env.GEMINI_FLASH_MODEL || 'gemini-2.5-flash-lite';
+  // Priority model sequence with gemini-3.5-flash-lite first
+  const configuredModel = process.env.GEMINI_FLASH_MODEL || 'gemini-3.5-flash-lite';
+  const candidateModels = Array.from(
+    new Set([
+      'gemini-3.5-flash-lite',
+      configuredModel,
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-flash',
+    ])
+  );
 
   const systemPrompt = `You are a software architecture analysis engine.
 You are given a list of architectural nodes from a repository with deterministic IDs (node-0, node-1, etc.).
@@ -96,15 +104,22 @@ Do NOT include markdown fences, code backticks, or any explanatory text. Pure JS
   let edges: MapEdge[] = [];
 
   try {
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: userPrompt,
-      config: {
-        temperature: 0.1,
-      },
-    });
-
-    const rawText = response.text || '';
+    let rawText = '';
+    for (const model of candidateModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: userPrompt,
+          config: {
+            temperature: 0.1,
+          },
+        });
+        rawText = response.text || '';
+        if (rawText) break;
+      } catch (err: any) {
+        console.warn(`[geminiArchitect] Model '${model}' failed: ${err?.message || err}. Trying next...`);
+      }
+    }
     const cleaned = cleanJsonOutput(rawText);
     const parsedEdges = JSON.parse(cleaned);
 
@@ -120,7 +135,7 @@ Do NOT include markdown fences, code backticks, or any explanatory text. Pure JS
           id: typeof edge.id === 'string' && edge.id ? edge.id : `edge-${idx}`,
           source: edge.source,
           target: edge.target,
-          relation: typeof edge.relation === 'string' ? edge.relation : 'depends on',
+          relation: typeof edge.relation === 'string' ? edge.relation.replace(/"/g, "'") : 'depends on',
         }));
     }
   } catch (err) {
@@ -139,7 +154,7 @@ Do NOT include markdown fences, code backticks, or any explanatory text. Pure JS
             id: `edge-${edgeIdx++}`,
             source: sourceNode.id,
             target: targetNode.id,
-            relation: `imports ${targetNode.label}`,
+            relation: `imports ${targetNode.label.replace(/"/g, "'")}`,
           });
         }
       }
