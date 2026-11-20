@@ -23,6 +23,7 @@ import type { ArchitectureMap, RepoSkeleton } from "@/shared/types";
 import { parseRepo } from "@/lib/ast-parser";
 import { useAuth } from "@/components/AuthProvider";
 import { buildNodeRegistry } from "@/lib/node-registry";
+import { buildProgressiveMermaidDiagram } from "@/lib/diagram-generator";
 import type { FocusRequest } from "@/components/MermaidCanvas";
 
 const MermaidCanvas = dynamic(() => import("@/components/MermaidCanvas"), {
@@ -54,6 +55,9 @@ export default function DashboardWorkspace() {
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
 
   const [activeZoneFilter, setActiveZoneFilter] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"overview" | "expanded">("expanded");
+  const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
+  const [isNeighborhoodFocused, setIsNeighborhoodFocused] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -65,9 +69,21 @@ export default function DashboardWorkspace() {
     }
   }, []);
 
+  const effectiveMermaidDef = useMemo(
+    () =>
+      buildProgressiveMermaidDiagram({
+        skeleton,
+        architectureMap,
+        baseMermaidDef: mermaidDef,
+        viewMode,
+        expandedZones,
+      }),
+    [skeleton, architectureMap, mermaidDef, viewMode, expandedZones]
+  );
+
   const registry = useMemo(
-    () => buildNodeRegistry(mermaidDef, skeleton, architectureMap),
-    [mermaidDef, skeleton, architectureMap]
+    () => buildNodeRegistry(effectiveMermaidDef, skeleton, architectureMap),
+    [effectiveMermaidDef, skeleton, architectureMap]
   );
 
   const selectedNode = useMemo(() => {
@@ -132,6 +148,7 @@ export default function DashboardWorkspace() {
         setSelectedId(null);
         setActiveZoneFilter(null);
         setHighlightedIds([]);
+        setIsNeighborhoodFocused(false);
         setIsSearchOpen(false);
       }
       if (e.key === '0' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
@@ -213,6 +230,12 @@ export default function DashboardWorkspace() {
         }
       }
 
+      // Auto-default to Overview when > 14 files, Expand All when <= 14 files
+      const fileCount =
+        data.architectureMap?.nodes?.length ?? activeSkeleton?.files?.length ?? 0;
+      setViewMode(fileCount > 14 ? "overview" : "expanded");
+      setExpandedZones(new Set());
+      setIsNeighborhoodFocused(false);
       setSelectedId(null);
       setActiveZoneFilter(null);
       setHighlightedIds([]);
@@ -236,12 +259,38 @@ export default function DashboardWorkspace() {
 
   const handleNodeSelect = useCallback(
     (id: string) => {
+      // Clicking a collapsed Zone Cluster card expands that zone in place
+      if (id.startsWith("zone_cluster_")) {
+        const zoneKey = id.replace(/^zone_cluster_/, "");
+        setExpandedZones((prev) => {
+          const next = new Set(prev);
+          next.add(zoneKey);
+          return next;
+        });
+        return;
+      }
+
       const canonical = registry.resolve(id) || id;
       setSelectedId(canonical);
+      setIsNeighborhoodFocused(false);
       setFocusRequest({ id: canonical, nonce: Date.now() });
     },
     [registry]
   );
+
+  const handleToggleNeighborhoodFocus = useCallback(() => {
+    if (!selectedNode) return;
+    if (isNeighborhoodFocused) {
+      setIsNeighborhoodFocused(false);
+      setHighlightedIds([]);
+    } else {
+      const neighbors = new Set<string>([selectedNode.id]);
+      registry.incoming(selectedNode.id).forEach((e) => neighbors.add(e.source));
+      registry.outgoing(selectedNode.id).forEach((e) => neighbors.add(e.target));
+      setHighlightedIds(Array.from(neighbors));
+      setIsNeighborhoodFocused(true);
+    }
+  }, [selectedNode, isNeighborhoodFocused, registry]);
 
   const handleHighlightFromChat = useCallback(
     (ids: string[]) => {
@@ -272,6 +321,7 @@ export default function DashboardWorkspace() {
     setSelectedId(null);
     setActiveZoneFilter(null);
     setHighlightedIds([]);
+    setIsNeighborhoodFocused(false);
     setFocusRequest({ id: '__RESET__', nonce: Date.now() });
   }, []);
 
@@ -364,7 +414,7 @@ export default function DashboardWorkspace() {
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="Search files... ⌘K"
+              placeholder="Search files..."
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -444,16 +494,39 @@ export default function DashboardWorkspace() {
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden p-3 gap-3 bg-[#ffffff]">
         <section className="flex-1 flex flex-col min-w-0 h-full relative">
-          {mermaidDef ? (
+          {effectiveMermaidDef ? (
             <>
               <MermaidCanvas
-                definition={mermaidDef}
+                definition={effectiveMermaidDef}
                 selectedId={selectedId}
                 highlightedIds={highlightedIds}
                 edges={registry.edges}
                 onNodeSelect={handleNodeSelect}
                 onBackgroundClick={handleClearSelection}
                 focusRequest={focusRequest}
+                viewMode={viewMode}
+                isFocusNeighborhood={isNeighborhoodFocused}
+                onExpandZone={(zoneKey) => {
+                  setExpandedZones((prev) => {
+                    const next = new Set(prev);
+                    next.add(zoneKey);
+                    return next;
+                  });
+                }}
+                onCollapseZone={(zoneKey) => {
+                  setExpandedZones((prev) => {
+                    const next = new Set(prev);
+                    next.delete(zoneKey);
+                    return next;
+                  });
+                }}
+                onViewModeChange={(mode) => {
+                  setViewMode(mode);
+                  if (mode === "overview") setExpandedZones(new Set());
+                  setSelectedId(null);
+                  setHighlightedIds([]);
+                  setIsNeighborhoodFocused(false);
+                }}
               />
 
               {selectedNode && (
@@ -465,6 +538,8 @@ export default function DashboardWorkspace() {
                   onFocusNode={handleNodeSelect}
                   onHighlightGroup={handleHighlightFromChat}
                   onOpenCopilot={() => setIsCopilotOpen(true)}
+                  isNeighborhoodFocused={isNeighborhoodFocused}
+                  onToggleNeighborhoodFocus={handleToggleNeighborhoodFocus}
                 />
               )}
 
