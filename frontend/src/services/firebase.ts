@@ -53,9 +53,36 @@ const firebaseConfig = {
     'repolens-fc889',
 };
 
-// Safe initialization guarding against duplicate initialization
-const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const auth: Auth = getAuth(app);
+let appInstance: FirebaseApp | null = null;
+let authInstance: Auth | null = null;
+
+function isFirebaseConfigured(): boolean {
+  const key =
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
+    process.env.VITE_FIREBASE_API_KEY ||
+    getViteEnv('VITE_FIREBASE_API_KEY') ||
+    '';
+  return key.trim().length > 0;
+}
+
+export function getFirebaseAuth(): Auth | null {
+  if (authInstance) return authInstance;
+  if (!isFirebaseConfigured()) return null;
+
+  try {
+    if (!appInstance) {
+      appInstance = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    }
+    authInstance = getAuth(appInstance);
+    return authInstance;
+  } catch (err) {
+    console.warn('[Firebase] Auth initialization failed:', err);
+    return null;
+  }
+}
+
+// Initialized if credentials exist; null during SSG build/missing env without crashing
+const auth: Auth | null = isFirebaseConfigured() ? getFirebaseAuth() : null;
 
 const githubProvider = new GithubAuthProvider();
 githubProvider.addScope('repo');
@@ -68,8 +95,13 @@ const GITHUB_USER_STORAGE_KEY = 'repolens_gh_username';
  * Subscribes to Firebase Auth state changes.
  */
 export function onAuthUserChanged(callback: (user: AuthUser | null) => void) {
-  if (typeof (auth as any)?.onAuthStateChanged === 'function') {
-    return (auth as any).onAuthStateChanged(callback);
+  const currentAuth = auth || getFirebaseAuth();
+  if (currentAuth && typeof (currentAuth as any)?.onAuthStateChanged === 'function') {
+    return (currentAuth as any).onAuthStateChanged(callback);
+  }
+  // Safely inform subscriber if Auth is unavailable (e.g. static prerendering or unconfigured)
+  if (typeof window !== 'undefined') {
+    setTimeout(() => callback(null), 0);
   }
   return () => {};
 }
@@ -79,7 +111,11 @@ export function onAuthUserChanged(callback: (user: AuthUser | null) => void) {
  * Stores the GitHub access token in sessionStorage for repository reading.
  */
 export async function signInWithGitHub(): Promise<{ user: AuthUser; githubAccessToken: string | null }> {
-  const result = await signInWithPopup(auth, githubProvider);
+  const currentAuth = auth || getFirebaseAuth();
+  if (!currentAuth) {
+    throw new Error('Firebase Auth is not configured. Please set NEXT_PUBLIC_FIREBASE_API_KEY in your environment.');
+  }
+  const result = await signInWithPopup(currentAuth, githubProvider);
   const credential = GithubAuthProvider.credentialFromResult(result);
   const githubAccessToken = credential?.accessToken || null;
   let username: string | null = (result as any)?._tokenResponse?.screenName || null;
@@ -124,7 +160,12 @@ export async function signInWithGitHub(): Promise<{ user: AuthUser; githubAccess
  * Signs the user out of Firebase and clears stored GitHub credentials.
  */
 export async function signOutUser(): Promise<void> {
-  await signOut(auth);
+  const currentAuth = auth || getFirebaseAuth();
+  if (currentAuth) {
+    try {
+      await signOut(currentAuth);
+    } catch {}
+  }
   if (typeof window !== 'undefined' && window.sessionStorage) {
     window.sessionStorage.removeItem(GITHUB_TOKEN_STORAGE_KEY);
     window.sessionStorage.removeItem(GITHUB_USER_STORAGE_KEY);
