@@ -44,13 +44,29 @@ export async function generateMapFromBackend(skeleton: RepoSkeleton): Promise<Ar
     }),
   });
 
+  const data = await res.json().catch(() => null);
+
   if (!res.ok) {
-    const errorText = await res.text().catch(() => "");
-    throw new Error(`Cloud Run backend error (${res.status}): ${errorText || res.statusText}`);
+    const errorText =
+      (data && typeof data === "object" && (data.error || data.details)) ||
+      `Backend error (${res.status})`;
+    throw new Error(errorText);
   }
 
-  const data: ArchitectureMap = await res.json();
-  return data;
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid response received from architecture map backend");
+  }
+
+  if (data.error) {
+    throw new Error(data.error);
+  }
+
+  const map: ArchitectureMap = data.architectureMap || data;
+  if (!map || !Array.isArray(map.nodes)) {
+    throw new Error("Backend response is missing a valid architectureMap nodes array");
+  }
+
+  return map;
 }
 
 /**

@@ -121,10 +121,24 @@ Do NOT include markdown fences, code backticks, or any explanatory text. Pure JS
       }
     }
     const cleaned = cleanJsonOutput(rawText);
-    const parsedEdges = JSON.parse(cleaned);
+    let parsedJson: any = null;
+    try {
+      parsedJson = JSON.parse(cleaned);
+    } catch {
+      const match = cleaned.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          parsedJson = JSON.parse(match[0]);
+        } catch {}
+      }
+    }
 
-    if (Array.isArray(parsedEdges)) {
-      edges = parsedEdges
+    const candidateEdges = Array.isArray(parsedJson)
+      ? parsedJson
+      : parsedJson?.edges || parsedJson?.architectureMap?.edges || [];
+
+    if (Array.isArray(candidateEdges)) {
+      edges = candidateEdges
         .filter((edge: any) => {
           const isValidSource = edge && typeof edge.source === 'string' && validNodeIds.has(edge.source);
           const isValidTarget = edge && typeof edge.target === 'string' && validNodeIds.has(edge.target);

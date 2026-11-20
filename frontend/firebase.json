@@ -2,6 +2,7 @@
   "hosting": {
     "site": "repolens-fc889",
     "public": "out",
+    "cleanUrls": true,
     "ignore": [
       "firebase.json",
       "**/.*",

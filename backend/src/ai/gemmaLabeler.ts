@@ -127,21 +127,29 @@ Do NOT include any markdown fences or conversational text. Output pure JSON only
   try {
     const cleanedText = cleanJsonOutput(rawText);
 
-    let parsed: any[];
+    let parsed: any;
     try {
       parsed = JSON.parse(cleanedText);
-    } catch (parseErr) {
-      console.error('[gemmaLabeler] Failed to parse model output as JSON. Raw output was:\n', rawText);
-      throw new Error(`JSON parse error from model (${successfulModel}) output: ${(parseErr as Error).message}`);
+    } catch {
+      const match = cleanedText.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch {}
+      }
     }
 
-    if (!Array.isArray(parsed)) {
+    const candidateList = Array.isArray(parsed)
+      ? parsed
+      : parsed?.modules || parsed?.files || parsed?.nodes || parsed?.architectureMap?.modules || [];
+
+    if (!Array.isArray(candidateList)) {
       throw new Error(`Model (${successfulModel}) output is not a JSON array.`);
     }
 
     // Defensive mapping and fallback to ensure contract adherence
     const labeledModules: LabeledModule[] = files.map((file) => {
-      const match = parsed.find((item) => item?.filePath === file.filePath) || {};
+      const match = candidateList.find((item: any) => item?.filePath === file.filePath) || {};
       const zone: ZoneCategory = isValidZone(match.zone) ? match.zone : 'Services';
       const label = typeof match.label === 'string' && match.label.trim().length > 0
         ? match.label.trim()

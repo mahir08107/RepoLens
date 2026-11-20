@@ -34,11 +34,18 @@ export function parseGitHubRepoUrl(url: string): { owner: string; repo: string }
  */
 export function shouldIncludeFile(path: string): boolean {
   const lower = path.toLowerCase();
-  const validExts = [".js", ".ts", ".tsx", ".jsx", ".py"];
+  const validExts = [
+    ".js", ".ts", ".tsx", ".jsx", ".py",
+    ".cs", ".java", ".cpp", ".c", ".h", ".hpp", ".go", ".rs", ".rb", ".php",
+    ".swift", ".kt", ".dart", ".html", ".css", ".vue", ".svelte", ".json", ".yaml", ".yml", ".toml", ".md"
+  ];
   const hasValidExt = validExts.some((ext) => lower.endsWith(ext));
   if (!hasValidExt) return false;
 
-  const excludedSegments = ["test/", "tests/", "examples/", "benchmarks/", "node_modules/", "dist/", "mocks/", "mock/"];
+  const excludedSegments = [
+    "test/", "tests/", "examples/", "benchmarks/", "node_modules/", "dist/",
+    "build/", "bin/", "obj/", ".git/", "mocks/", "mock/", "vendor/"
+  ];
   const isExcluded = excludedSegments.some(
     (segment) => lower.startsWith(segment) || lower.includes("/" + segment)
   );
@@ -106,8 +113,27 @@ export async function fetchFilteredFileTree(
   for (const item of tree) {
     if (item.type === "blob" && typeof item.path === "string" && shouldIncludeFile(item.path)) {
       matchedPaths.push(item.path);
-      if (matchedPaths.length >= 30) {
-        break; // Cap at 30 files
+      if (matchedPaths.length >= 35) {
+        break; // Cap at 35 files
+      }
+    }
+  }
+
+  // If no files matched, include any non-binary files so small or unusual repos never return 0 files
+  if (matchedPaths.length === 0) {
+    const binaryExts = [
+      ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf",
+      ".eot", ".zip", ".tar", ".gz", ".exe", ".dll", ".so", ".dylib", ".pdf"
+    ];
+    for (const item of tree) {
+      if (item.type === "blob" && typeof item.path === "string") {
+        const lower = item.path.toLowerCase();
+        const isBinary = binaryExts.some((ext) => lower.endsWith(ext));
+        const isExcluded = ["node_modules/", ".git/", "dist/", "build/", "bin/", "obj/"].some((s) => lower.includes(s));
+        if (!isBinary && !isExcluded) {
+          matchedPaths.push(item.path);
+          if (matchedPaths.length >= 35) break;
+        }
       }
     }
   }
@@ -170,29 +196,29 @@ function extractSkeletonSynchronous(
   for (const [filePath, source] of Object.entries(fileMap)) {
     const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
 
-    // Extract imports
-    const importRegex = /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g;
+    // Extract imports across JS/TS, Python, C#, Java, Go, C/C++
+    const importRegex = /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\)|(?:from|import)\s+([a-zA-Z0-9_.]+)(?:\s+import)?|using\s+([a-zA-Z0-9_.]+);|#include\s+[<"]([^>"]+)[>"])/g;
     const imports: string[] = [];
     let match: RegExpExecArray | null;
     while ((match = importRegex.exec(source)) !== null) {
-      const val = match[1] || match[2];
+      const val = match[1] || match[2] || match[3] || match[4] || match[5];
       if (val && !imports.includes(val)) imports.push(val);
     }
 
-    // Extract exports
-    const exportRegex = /(?:export\s+(?:default\s+)?(?:const|let|var|function|class|type|interface)\s+([a-zA-Z0-9_$]+)|module\.exports\s*=\s*([a-zA-Z0-9_$]+)|exports\.([a-zA-Z0-9_$]+))/g;
+    // Extract exports & class declarations
+    const exportRegex = /(?:export\s+(?:default\s+)?(?:const|let|var|function|class|type|interface)\s+([a-zA-Z0-9_$]+)|module\.exports\s*=\s*([a-zA-Z0-9_$]+)|exports\.([a-zA-Z0-9_$]+)|class\s+([a-zA-Z0-9_$]+))/g;
     const exports: string[] = [];
     while ((match = exportRegex.exec(source)) !== null) {
-      const val = match[1] || match[2] || match[3];
+      const val = match[1] || match[2] || match[3] || match[4];
       if (val && !exports.includes(val)) exports.push(val);
     }
 
-    // Extract function signatures (bodies stripped)
-    const funcRegex = /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g;
+    // Extract function signatures (bodies stripped) across JS/TS, Python, Go, C#
+    const funcRegex = /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>|def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)|func\s+(?:\([^)]+\)\s*)?([a-zA-Z0-9_]+)\s*\(([^)]*)\)/g;
     const functionSignatures: string[] = [];
     while ((match = funcRegex.exec(source)) !== null) {
-      const name = match[1] || match[3] || "anonymous";
-      const params = (match[2] || match[4] || "").trim().replace(/\s+/g, " ");
+      const name = match[1] || match[3] || match[5] || match[7] || "anonymous";
+      const params = (match[2] || match[4] || match[6] || match[8] || "").trim().replace(/\s+/g, " ");
       functionSignatures.push(`${name}(${params})`);
     }
 

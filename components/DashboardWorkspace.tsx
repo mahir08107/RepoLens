@@ -231,14 +231,33 @@ export default function DashboardWorkspace() {
           }),
         });
 
-        if (response.ok) {
-          data = await response.json();
+        const json = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          const errDetail =
+            json && typeof json === "object" && json.error
+              ? json.error
+              : `Backend returned HTTP ${response.status}`;
+          throw new Error(errDetail);
+        }
+
+        if (json && typeof json === "object") {
+          if (json.error) {
+            throw new Error(json.error);
+          }
+          data = json;
         }
       } catch (backendErr: any) {
         console.warn("Backend /api/generate-map notice:", backendErr?.message);
+        if (backendErr?.message && !backendErr.message.includes("fetch")) {
+          setError(backendErr.message);
+        }
       }
 
-      const activeSkeleton = extractedSkeleton || data?.skeleton;
+      const activeSkeleton =
+        extractedSkeleton ||
+        (data && typeof data === "object" ? data.skeleton || data : null);
+
       if (activeSkeleton) {
         setSkeleton(activeSkeleton);
         if (typeof window !== "undefined") {
@@ -246,36 +265,51 @@ export default function DashboardWorkspace() {
         }
       }
 
-      if (data && Array.isArray(data.nodes) && data.nodes.length > 0) {
-        setArchitectureMap(data);
+      // Safe resolution of architectureMap with strict null-safety
+      const rawArchMap =
+        data && typeof data === "object" ? data.architectureMap || data : null;
+      const hasValidNodes =
+        rawArchMap &&
+        typeof rawArchMap === "object" &&
+        Array.isArray(rawArchMap.nodes) &&
+        rawArchMap.nodes.length > 0;
+
+      if (hasValidNodes) {
+        setArchitectureMap(rawArchMap);
         if (activeSkeleton) {
-          const converted = convertArchitectureMapToMermaid(data, activeSkeleton);
+          const converted = convertArchitectureMapToMermaid(rawArchMap, activeSkeleton);
           if (converted.mermaidDefinition) {
             setMermaidDef(converted.mermaidDefinition);
             setLegend(converted.groupColors);
           }
         }
-      } else if (data?.mermaidDefinition) {
+      } else if (data && typeof data === "object" && data.mermaidDefinition) {
         setMermaidDef(data.mermaidDefinition);
         if (data.groupColors) {
           setLegend(data.groupColors);
         }
-        if (data.architectureMap) {
+        if (data.architectureMap && typeof data.architectureMap === "object") {
           setArchitectureMap(data.architectureMap);
         } else {
           setArchitectureMap(null);
         }
       } else if (activeSkeleton) {
-        // High-fidelity algorithmic fallback so map always renders even if backend is waking up
+        // High-fidelity algorithmic fallback so map always renders even if backend is waking up or 0 AST
         const fallback = generateMermaidDiagram(activeSkeleton);
         setMermaidDef(fallback.mermaidDefinition);
         setLegend(fallback.groupColors);
         setArchitectureMap(null);
+      } else {
+        throw new Error(
+          (data && typeof data === "object" && data.error) ||
+            "Could not parse repository files. Please verify the repository URL."
+        );
       }
 
-      // Auto-default to Overview when > 14 files, Expand All when <= 14 files
+      // Safe file count calculation - NEVER access data.architectureMap when data is null/undefined
       const fileCount =
-        data.architectureMap?.nodes?.length ?? activeSkeleton?.files?.length ?? 0;
+        (hasValidNodes ? rawArchMap.nodes.length : 0) ||
+        (activeSkeleton && Array.isArray(activeSkeleton.files) ? activeSkeleton.files.length : 0);
       setViewMode(fileCount > 14 ? "overview" : "expanded");
       setExpandedZones(new Set());
       setIsNeighborhoodFocused(false);
