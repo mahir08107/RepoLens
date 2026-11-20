@@ -1,0 +1,264 @@
+{
+    "repoUrl": "https://github.com/expressjs/express",
+    "commitSha": "43fca52d28a422c8be48fd489cbd4f2d6152bab6",
+    "files": [
+        {
+            "filePath": "lib/response.js",
+            "imports": [
+                "content-disposition",
+                "http-errors",
+                "depd",
+                "encodeurl",
+                "escape-html",
+                "node:http",
+                "on-finished",
+                "mime-types",
+                "node:path",
+                "statuses",
+                "cookie-signature",
+                "./utils",
+                "cookie",
+                "send",
+                "vary",
+                "node:buffer"
+            ],
+            "exports": [
+                "res"
+            ],
+            "functionSignatures": [
+                "status(code)",
+                "anonymous(links)",
+                "anonymous(rel)",
+                "anonymous(singleLink)",
+                "send(body)",
+                "json(obj)",
+                "jsonp(obj)",
+                "sendStatus(statusCode)",
+                "anonymous(req, res)",
+                "anonymous(yes)",
+                "sendFile(path, options, callback)",
+                "anonymous(err)",
+                "download(path, filename, options, callback)",
+                "contentType(type)",
+                "anonymous()",
+                "anonymous()",
+                "anonymous()",
+                "anonymous()",
+                "anonymous()",
+                "anonymous()",
+                "anonymous(obj)",
+                "anonymous(v)",
+                "anonymous(o)",
+                "attachment(filename)",
+                "append(field, val)",
+                "header(field, val)",
+                "anonymous(field)",
+                "clearCookie(name, options)",
+                "anonymous(name, value, options)",
+                "location(url)",
+                "redirect(url)",
+                "anonymous()",
+                "anonymous()",
+                "anonymous()",
+                "anonymous(field)",
+                "render(view, options, callback)",
+                "anonymous(err, str)",
+                "sendfile(res, file, options, callback)",
+                "onaborted()",
+                "ondirectory()",
+                "onerror(err)",
+                "onend()",
+                "onfile()",
+                "onfinish(err)",
+                "anonymous()",
+                "onstream()",
+                "headers(res)",
+                "stringify(value, replacer, spaces, escape)",
+                "anonymous(c)"
+            ]
+        },
+        {
+            "filePath": "index.js",
+            "imports": [
+                "./lib/express"
+            ],
+            "exports": [
+                "require"
+            ],
+            "functionSignatures": []
+        },
+        {
+            "filePath": "lib/express.js",
+            "imports": [
+                "body-parser",
+                "node:events",
+                "merge-descriptors",
+                "./application",
+                "router",
+                "./request",
+                "./response",
+                "serve-static"
+            ],
+            "exports": [
+                "createApplication",
+                "application",
+                "request",
+                "response",
+                "Route",
+                "Router",
+                "json",
+                "raw",
+                "static",
+                "text",
+                "urlencoded"
+            ],
+            "functionSignatures": [
+                "createApplication()",
+                "anonymous(req, res, next)"
+            ]
+        },
+        {
+            "filePath": "lib/utils.js",
+            "imports": [
+                "node:http",
+                "content-type",
+                "etag",
+                "mime-types",
+                "proxy-addr",
+                "qs",
+                "node:querystring",
+                "node:buffer"
+            ],
+            "exports": [
+                "methods",
+                "etag",
+                "wetag",
+                "normalizeType",
+                "normalizeTypes",
+                "compileETag",
+                "compileQueryParser",
+                "compileTrust",
+                "setCharset"
+            ],
+            "functionSignatures": [
+                "anonymous(type)",
+                "anonymous(types)",
+                "acceptParams(str)",
+                "anonymous(val)",
+                "compileQueryParser(val)",
+                "anonymous(val)",
+                "anonymous()",
+                "anonymous(a, i)",
+                "anonymous(v)",
+                "setCharset(type, charset)",
+                "createETagGenerator(options)",
+                "generateETag(body, encoding)",
+                "parseExtendedQueryString(str)"
+            ]
+        },
+        {
+            "filePath": "lib/request.js",
+            "imports": [
+                "accepts",
+                "node:net",
+                "type-is",
+                "node:http",
+                "fresh",
+                "range-parser",
+                "parseurl",
+                "proxy-addr"
+            ],
+            "exports": [
+                "req"
+            ],
+            "functionSignatures": [
+                "header(name)",
+                "anonymous()",
+                "anonymous()",
+                "anonymous(...charsets)",
+                "anonymous(...languages)",
+                "range(size, options)",
+                "query()",
+                "is(types)",
+                "protocol()",
+                "secure()",
+                "ip()",
+                "ips()",
+                "subdomains()",
+                "path()",
+                "host()",
+                "hostname()",
+                "anonymous()",
+                "stale()",
+                "xhr()",
+                "defineGetter(obj, name, getter)"
+            ]
+        },
+        {
+            "filePath": "lib/application.js",
+            "imports": [
+                "finalhandler",
+                "debug",
+                "./view",
+                "node:http",
+                "./utils",
+                "node:path",
+                "once",
+                "router",
+                "ejs",
+                "node:https",
+                "express"
+            ],
+            "exports": [],
+            "functionSignatures": [
+                "init()",
+                "getrouter()",
+                "defaultConfiguration()",
+                "onmount(parent)",
+                "handle(req, res, callback)",
+                "use(fn)",
+                "anonymous(fn)",
+                "mounted_app(req, res, next)",
+                "anonymous(err)",
+                "route(path)",
+                "engine(ext, fn)",
+                "param(name, fn)",
+                "set(setting, val)",
+                "path()",
+                "enabled(setting)",
+                "disabled(setting)",
+                "enable(setting)",
+                "disable(setting)",
+                "anonymous(method)",
+                "anonymous(path)",
+                "all(path)",
+                "anonymous(err, html)",
+                "render(name, options, callback)",
+                "listen()",
+                "logerror(err)",
+                "tryRender(view, options, callback)"
+            ]
+        },
+        {
+            "filePath": "lib/view.js",
+            "imports": [
+                "debug",
+                "node:path",
+                "node:fs"
+            ],
+            "exports": [
+                "View",
+                "fn"
+            ],
+            "functionSignatures": [
+                "View(name, options)",
+                "lookup(name)",
+                "render(options, callback)",
+                "onRender()",
+                "renderTick()",
+                "resolve(dir, file)",
+                "tryStat(path)"
+            ]
+        }
+    ]
+}

@@ -1,15 +1,16 @@
 // lib/ast-worker.ts
 /**
  * Web Worker that runs tree‑sitter parsers for multiple languages and extracts a
- * structural skeleton from source files. Only metadata (imports/exports/classes
+ * structural skeleton from source files. Only metadata (imports/exports
  * /function signatures) is kept; function bodies are omitted to preserve privacy.
  */
 
-import * as TreeSitter from "web-tree-sitter";
+import type { FileSkeleton, RepoSkeleton } from "../shared/types";
 
-// Mapping of file extensions to their language grammar loader URLs. In a real
-// project these would point to the pre‑compiled WASM binaries bundled with the
- // app. Here we use placeholder CDN URLs (Tree‑sitter grammar releases).
+// Safely resolve TreeSitter in Web Worker without requiring npm module bundling
+let TreeSitter: any = typeof (self as any).TreeSitter !== "undefined" ? (self as any).TreeSitter : null;
+
+// Mapping of file extensions to their language grammar loader URLs.
 const LANGUAGE_LOADERS: Record<string, string> = {
   ts: "https://unpkg.com/tree-sitter-typescript@0.20.2/wasm/typescript.wasm",
   tsx: "https://unpkg.com/tree-sitter-typescript@0.20.2/wasm/tsx.wasm",
@@ -27,129 +28,136 @@ interface MessagePayload {
 }
 
 /**
- * Extract imports from a given source string using a language‑specific query.
+ * Extract imports from a given source string using language‑specific queries.
  */
 function extractImports(source: string, language: string): string[] {
   const importRegexes: Record<string, RegExp> = {
-    ts: /import\s+.*?from\s+['"]([^'\"]+)['"]/g,
-    tsx: /import\s+.*?from\s+['"]([^'\"]+)['"]/g,
-    js: /import\s+.*?from\s+['"]([^'\"]+)['"]/g,
-    jsx: /import\s+.*?from\s+['"]([^'\"]+)['"]/g,
+    ts: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    tsx: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    js: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
+    jsx: /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\(['"]([^'"]+)['"]\))/g,
     py: /^(?:import|from)\s+([\w\.]+)/gm,
     go: /import\s+\(?\s*"([^"]+)"/g,
     java: /import\s+([\w\.]+);/g,
   };
-  const regex = importRegexes[language];
-  if (!regex) return [];
+  const regex = importRegexes[language] || importRegexes.js;
   const imports: string[] = [];
-  let match;
+  let match: RegExpExecArray | null;
   while ((match = regex.exec(source)) !== null) {
-    imports.push(match[1]);
+    const val = match[1] || match[2];
+    if (val && !imports.includes(val)) {
+      imports.push(val);
+    }
   }
   return imports;
 }
 
 /**
- * Very lightweight extraction of exported identifiers and class / function names.
- * This is not a full AST walk – it keeps the worker tiny and fast.
+ * Lightweight extraction of exported identifiers.
  */
 function extractExports(source: string, language: string): string[] {
   const exportRegexes: Record<string, RegExp> = {
-    ts: /export\s+(?:const|let|var|function|class)\s+(\w+)/g,
-    tsx: /export\s+(?:const|let|var|function|class)\s+(\w+)/g,
-    js: /export\s+(?:const|let|var|function|class)\s+(\w+)/g,
-    jsx: /export\s+(?:const|let|var|function|class)\s+(\w+)/g,
-    py: /^(?:def|class)\s+(\w+)/gm,
-    go: /func\s+(\w+)\s*\(/g,
-    java: /public\s+(?:class|interface|enum|\w+)\s+(\w+)/g,
+    ts: /(?:export\s+(?:default\s+)?(?:const|let|var|function|class|type|interface)\s+([a-zA-Z0-9_$]+)|module\.exports\s*=\s*([a-zA-Z0-9_$]+)|exports\.([a-zA-Z0-9_$]+))/g,
+    tsx: /(?:export\s+(?:default\s+)?(?:const|let|var|function|class|type|interface)\s+([a-zA-Z0-9_$]+)|module\.exports\s*=\s*([a-zA-Z0-9_$]+)|exports\.([a-zA-Z0-9_$]+))/g,
+    js: /(?:export\s+(?:default\s+)?(?:const|let|var|function|class)\s+([a-zA-Z0-9_$]+)|module\.exports\s*=\s*([a-zA-Z0-9_$]+)|exports\.([a-zA-Z0-9_$]+))/g,
+    jsx: /(?:export\s+(?:default\s+)?(?:const|let|var|function|class)\s+([a-zA-Z0-9_$]+)|module\.exports\s*=\s*([a-zA-Z0-9_$]+)|exports\.([a-zA-Z0-9_$]+))/g,
+    py: /^(?:def|class)\s+([a-zA-Z0-9_]+)/gm,
+    go: /func\s+([A-Z][a-zA-Z0-9_]*)\s*\(/g,
+    java: /public\s+(?:class|interface|enum|\w+)\s+([a-zA-Z0-9_]+)/g,
   };
-  const regex = exportRegexes[language];
-  if (!regex) return [];
+  const regex = exportRegexes[language] || exportRegexes.js;
   const exports: string[] = [];
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = regex.exec(source)) !== null) {
-    exports.push(m[1]);
+    const val = m[1] || m[2] || m[3];
+    if (val && !exports.includes(val)) {
+      exports.push(val);
+    }
   }
   return exports;
 }
 
-function extractClasses(source: string, language: string): string[] {
-  const classRegexes: Record<string, RegExp> = {
-    ts: /class\s+(\w+)/g,
-    tsx: /class\s+(\w+)/g,
-    js: /class\s+(\w+)/g,
-    jsx: /class\s+(\w+)/g,
-    py: /^class\s+(\w+)/gm,
-    go: /type\s+(\w+)\s+struct/g,
-    java: /class\s+(\w+)/g,
-  };
-  const regex = classRegexes[language];
-  if (!regex) return [];
-  const classes: string[] = [];
-  let m;
-  while ((m = regex.exec(source)) !== null) {
-    classes.push(m[1]);
-  }
-  return classes;
-}
-
-function extractFunctions(source: string, language: string): string[] {
+/**
+ * Strips function bodies and extracts signature name + parameters.
+ */
+function extractFunctionSignatures(source: string, language: string): string[] {
   const funcRegexes: Record<string, RegExp> = {
-    ts: /function\s+(\w+)\s*\(([^)]*)\)/g,
-    tsx: /function\s+(\w+)\s*\(([^)]*)\)/g,
-    js: /function\s+(\w+)\s*\(([^)]*)\)/g,
-    jsx: /function\s+(\w+)\s*\(([^)]*)\)/g,
-    py: /^def\s+(\w+)\s*\(([^)]*)\)/gm,
-    go: /func\s+(\w+)\s*\(([^)]*)\)/g,
-    java: /(?:public|private|protected)\s+\w+\s+(\w+)\s*\(([^)]*)\)\s*\{/g,
+    ts: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    tsx: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    js: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    jsx: /(?:async\s+)?function\s*([a-zA-Z0-9_$]*)\s*\(([^)]*)\)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g,
+    py: /^def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\):/gm,
+    go: /func\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/g,
+    java: /(?:public|private|protected)\s+(?:static\s+)?[\w<>[\]]+\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/g,
   };
-  const regex = funcRegexes[language];
-  if (!regex) return [];
-  const funcs: string[] = [];
-  let m;
+  const regex = funcRegexes[language] || funcRegexes.js;
+  const signatures: string[] = [];
+  let m: RegExpExecArray | null;
   while ((m = regex.exec(source)) !== null) {
-    const params = m[2].trim().split(/\s*,\s*/).filter(Boolean).join(", ");
-    funcs.push(`${m[1]}(${params})`);
+    const name = m[1] || m[3] || 'anonymous';
+    const params = (m[2] || m[4] || '').trim().replace(/\s+/g, ' ');
+    signatures.push(`${name}(${params})`);
   }
-  return funcs;
+  return signatures;
 }
 
 self.onmessage = async (event: MessageEvent) => {
   const payload = event.data as MessagePayload;
   const { repoUrl, commitSha, fileMap } = payload;
-  const files: any[] = [];
-  const edges: { from: string; to: string }[] = [];
+  const files: FileSkeleton[] = [];
 
-  // Pre‑load all required language parsers (TreeSitter.init() once).
-  await TreeSitter.init();
+  let parser: any = null;
 
-  const parser = new TreeSitter.Parser();
+  if (!TreeSitter && typeof (self as any).importScripts === "function") {
+    try {
+      (self as any).importScripts("https://cdn.jsdelivr.net/npm/web-tree-sitter@0.20.8/tree-sitter.js");
+      TreeSitter = (self as any).TreeSitter;
+    } catch {
+      // Continues with regex AST extractor
+    }
+  }
+
+  try {
+    if (TreeSitter && typeof TreeSitter.init === "function") {
+      await TreeSitter.init();
+      parser = new TreeSitter.Parser();
+    }
+  } catch (err) {
+    console.warn("TreeSitter WASM init fallback to regex parser:", err);
+  }
 
   for (const [path, source] of Object.entries(fileMap)) {
-    const ext = path.split('.').pop() ?? "";
+    const ext = path.split('.').pop()?.toLowerCase() ?? "";
     const loaderUrl = LANGUAGE_LOADERS[ext];
-    if (!loaderUrl) continue; // unsupported file type
-    const Language = await TreeSitter.Language.load(loaderUrl);
-    parser.setLanguage(Language);
-    // Parsing is cheap; we still keep the tree for possible deeper analysis.
-    parser.parse(source);
-    const languageKey = ext; // use extension as language identifier
-    const imports = extractImports(source, languageKey);
-    const exports = extractExports(source, languageKey);
-    const classes = extractClasses(source, languageKey);
-    const functions = extractFunctions(source, languageKey);
-    files.push({ path, imports, exports, classes, functions });
-    // Create dependency edges from each imported module to this file.
-    imports.forEach((imp) => {
-      edges.push({ from: imp, to: path });
+
+    if (parser && loaderUrl) {
+      try {
+        const Language = await TreeSitter.Language.load(loaderUrl);
+        parser.setLanguage(Language);
+        parser.parse(source);
+      } catch (e) {
+        // Fallback to regex extraction
+      }
+    }
+
+    const imports = extractImports(source, ext);
+    const exports = extractExports(source, ext);
+    const functionSignatures = extractFunctionSignatures(source, ext);
+
+    files.push({
+      filePath: path,
+      imports,
+      exports,
+      functionSignatures,
     });
   }
 
-  const result = {
+  // Strictly return { repoUrl, commitSha, files } with NO edges
+  const result: RepoSkeleton = {
     repoUrl,
     commitSha,
     files,
-    edges,
-  } as any;
+  };
+
   self.postMessage(result);
 };

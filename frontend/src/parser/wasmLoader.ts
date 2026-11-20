@@ -6,7 +6,8 @@
  * which can be reused by the skeleton extractor.
  */
 
-import * as TreeSitter from "web-tree-sitter";
+// Dynamically access TreeSitter if available in window/global
+const getTreeSitter = () => (typeof window !== "undefined" ? (window as any).TreeSitter : null);
 
 // Mapping of file extensions to the corresponding grammar WASM URL (served from public/wasm)
 const GRAMMAR_URLS: Record<string, string> = {
@@ -24,18 +25,24 @@ const GRAMMAR_URLS: Record<string, string> = {
  * Returns a map where the key is the file extension (without the dot) and the
  * value is the loaded TreeSitter.Language object.
  */
-export async function loadLanguages(): Promise<Record<string, TreeSitter.Language>> {
-  await TreeSitter.init();
-  const languages: Record<string, TreeSitter.Language> = {};
-  for (const [ext, url] of Object.entries(GRAMMAR_URLS)) {
-    try {
-      const language = await TreeSitter.Language.load(url);
-      languages[ext] = language;
-    } catch (e) {
-      console.warn(`Failed to load TreeSitter grammar for .${ext} from ${url}:`, e);
+export async function loadLanguages(): Promise<Record<string, any>> {
+  const TreeSitter = getTreeSitter();
+  if (!TreeSitter) return {};
+  try {
+    await TreeSitter.init();
+    const languages: Record<string, any> = {};
+    for (const [ext, url] of Object.entries(GRAMMAR_URLS)) {
+      try {
+        const language = await TreeSitter.Language.load(url);
+        languages[ext] = language;
+      } catch (e) {
+        console.warn(`Failed to load TreeSitter grammar for .${ext} from ${url}:`, e);
+      }
     }
+    return languages;
+  } catch {
+    return {};
   }
-  return languages;
 }
 
 export type LanguageMap = ReturnType<typeof loadLanguages>;

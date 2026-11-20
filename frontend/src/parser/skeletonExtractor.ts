@@ -5,8 +5,9 @@
  * and function signatures, stripping all function bodies.
  * For unsupported languages it falls back to simple RegExp based extraction.
  */
-import * as TreeSitter from "web-tree-sitter";
-import type { RepoSkeleton, FileSkeleton } from "../../shared/types";
+// Dynamically access TreeSitter if available in window/global
+const getTreeSitter = () => (typeof window !== "undefined" ? (window as any).TreeSitter : null);
+import type { RepoSkeleton, FileSkeleton } from "@/shared/types";
 
 /** Regex fallbacks for quick extraction when Tree‑sitter is unavailable */
 const FALLBACK_REGEX = {
@@ -48,7 +49,7 @@ function extractFileSkeleton(
   path: string,
   source: string,
   language: string,
-  parser?: TreeSitter.Parser
+  parser?: any
 ): FileSkeleton {
   // If a TreeSitter parser is provided, we could walk the tree – omitted for brevity.
   // We'll rely on regex fallback which is sufficient for the hackathon.
@@ -76,14 +77,15 @@ export async function buildRepoSkeleton(
   repoUrl: string,
   commitSha: string,
   fileMap: Record<string, string>,
-  languageMap: Record<string, TreeSitter.Language>
+  languageMap: Record<string, any> = {}
 ): Promise<RepoSkeleton> {
   const files: FileSkeleton[] = [];
+  const TreeSitter = getTreeSitter();
 
   for (const [path, source] of Object.entries(fileMap)) {
     const ext = path.split('.').pop() ?? "";
-    const language = ext; // using extension as key
-    const parser = languageMap[language] ? new TreeSitter.Parser() : undefined;
+    const language = ext;
+    const parser = (TreeSitter && languageMap[language]) ? new TreeSitter.Parser() : undefined;
     if (parser) parser.setLanguage(languageMap[language]);
     const fileSkeleton = extractFileSkeleton(path, source, language, parser);
     files.push(fileSkeleton);

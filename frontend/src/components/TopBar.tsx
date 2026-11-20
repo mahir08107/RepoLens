@@ -19,7 +19,7 @@ const TopBar: React.FC<TopBarProps> = ({
   statusText,
   error,
 }) => {
-  const [url, setUrl] = useState('https://github.com/expressjs/express');
+  const [url, setUrl] = useState('https://github.com/mahir08107/RepoLens');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

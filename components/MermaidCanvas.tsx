@@ -25,19 +25,29 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
   const [isRendering, setIsRendering] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
 
+  // Safely resolve mermaid instance in various bundling environments
+  const getMermaid = () => (mermaid as any)?.default || mermaid;
+
   // Initialize mermaid configuration
   useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'neutral',
-      securityLevel: 'loose',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      flowchart: {
-        curve: 'basis',
-        useMaxWidth: false,
-        htmlLabels: true,
-      },
-    });
+    try {
+      const m = getMermaid();
+      m?.initialize?.({
+        startOnLoad: false,
+        theme: 'neutral',
+        securityLevel: 'loose',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        flowchart: {
+          curve: 'linear',
+          nodeSpacing: 60,
+          rankSpacing: 80,
+          useMaxWidth: false,
+          htmlLabels: true,
+        },
+      });
+    } catch (e) {
+      console.warn("Mermaid initialize warning:", e);
+    }
   }, []);
 
   // Render diagram whenever definition changes
@@ -48,9 +58,12 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
     const render = async () => {
       setIsRendering(true);
       setRenderError(null);
+      setScale(1);
+      setPosition({ x: 0, y: 0 });
       const uniqueId = `mermaid-canvas-${Date.now()}`;
       try {
-        const { svg } = await mermaid.render(uniqueId, definition);
+        const m = getMermaid();
+        const { svg } = await m.render(uniqueId, definition);
         if (!isCancelled && containerRef.current) {
           containerRef.current.innerHTML = svg;
           attachHandlers();
@@ -73,31 +86,38 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
     };
   }, [definition]);
 
-  // Apply highlight styles to selected and referenced nodes
+  // Apply highlight styles strictly to selected and referenced NODES (never edges!)
   const applyHighlights = useCallback(() => {
     if (!containerRef.current) return;
     const svg = containerRef.current.querySelector('svg');
     if (!svg) return;
 
-    // Reset previous highlights
-    svg.querySelectorAll('.highlighted-node').forEach((el) => el.classList.remove('highlighted-node'));
-    svg.querySelectorAll('.active-selected').forEach((el) => {
-      el.classList.remove('active-selected');
-      (el as HTMLElement).style.filter = '';
+    // Reset previous highlights on nodes
+    svg.querySelectorAll('g.node.highlighted-node').forEach((el) => {
+      el.classList.remove('highlighted-node');
     });
 
     const targetIds = new Set<string>();
     if (selectedId) targetIds.add(selectedId);
     highlightedIds.forEach((id) => targetIds.add(id));
 
-    targetIds.forEach((id) => {
-      // Search nodes matching id or partial id
-      const matches = svg.querySelectorAll(`[id*="${id}"], [id*="${id}"] rect, [id*="${id}"] circle, [id*="${id}"] polygon`);
-      matches.forEach((node) => {
-        const g = node.closest('g.node') || node;
-        g.classList.add('highlighted-node');
-        (g as HTMLElement).style.filter = 'drop-shadow(0 0 10px rgba(245, 158, 11, 0.9))';
-      });
+    if (targetIds.size === 0) return;
+
+    // ONLY select g.node elements to prevent turning lines/edges into orange dashes
+    const allNodes = svg.querySelectorAll('g.node');
+    allNodes.forEach((node) => {
+      const gId = (node.id || node.getAttribute('id') || '').toLowerCase();
+      let matched = false;
+      for (const tId of targetIds) {
+        const cleanT = tId.toLowerCase().replace(/^flowchart-/, '').replace(/^node_/, '');
+        if (cleanT && (gId === tId.toLowerCase() || gId.includes(cleanT))) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
+        node.classList.add('highlighted-node');
+      }
     });
   }, [selectedId, highlightedIds]);
 
@@ -111,13 +131,13 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
     const svg = containerRef.current.querySelector('svg');
     if (!svg) return;
 
-    const nodes = svg.querySelectorAll('g.node, g.cluster');
+    const nodes = svg.querySelectorAll('g.node');
     nodes.forEach((node) => {
       (node as HTMLElement).style.cursor = 'pointer';
       node.addEventListener('click', (e) => {
         e.stopPropagation();
-        const id = node.id || node.getAttribute('id') || '';
-        const cleanId = id.replace(/^flowchart-/, '').split('-')[0];
+        const rawId = node.id || node.getAttribute('id') || '';
+        const cleanId = rawId.replace(/^flowchart-/, '').split('-')[0];
         if (cleanId) {
           onNodeSelect(cleanId);
         }

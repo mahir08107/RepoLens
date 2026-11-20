@@ -61,3 +61,9 @@ export interface Chat {
   messages: ChatMessage[];
   selectedId?: string | null;
 }
+
+declare global {
+  interface Window {
+    __REPO_SKELETON__?: RepoSkeleton;
+  }
+}

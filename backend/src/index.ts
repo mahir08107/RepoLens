@@ -1,7 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { mapRouter } from './routes/mapRoute.js';
+import { mapRouter } from './routes/mapRoute';
+import { chatRouter } from './routes/chatRoute';
 
 dotenv.config();
 
@@ -17,8 +18,9 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Mount map routes under /api
+// Mount routes under /api
 app.use('/api', mapRouter);
+app.use('/api', chatRouter);
 
 // Start server if run directly
 if (process.env.NODE_ENV !== 'test') {
@@ -28,4 +30,3 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 export default app;
-
