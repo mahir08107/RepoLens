@@ -321,6 +321,96 @@ export function sanitizeMermaidText(str: string): string {
 }
 
 /**
+ * Computes a disambiguated display title for a file path (e.g., `dashboard / page.tsx`,
+ * `reports / charts.tsx`, `admin/users / page.tsx`) so duplicate basenames are never ambiguous.
+ */
+export function getDisambiguatedTitle(filePath: string, allFilePaths: string[] = []): string {
+  const clean = filePath.replace(/^\.?\//, "");
+  const segments = clean.split("/").filter(Boolean);
+  if (segments.length <= 1) return clean;
+
+  const base = segments[segments.length - 1];
+  const parent = segments[segments.length - 2];
+  const oneLevel = `${parent} / ${base}`;
+
+  // Check if another file in the repo shares the same `parent / base`
+  if (segments.length >= 3) {
+    const duplicateOneLevel = allFilePaths.some((other) => {
+      const otherClean = other.replace(/^\.?\//, "");
+      if (otherClean === clean) return false;
+      const otherSegs = otherClean.split("/").filter(Boolean);
+      if (otherSegs.length < 2) return false;
+      const otherOneLevel = `${otherSegs[otherSegs.length - 2]} / ${otherSegs[otherSegs.length - 1]}`;
+      return otherOneLevel.toLowerCase() === oneLevel.toLowerCase();
+    });
+
+    if (duplicateOneLevel) {
+      return `${segments[segments.length - 3]}/${parent} / ${base}`;
+    }
+  }
+
+  return oneLevel;
+}
+
+/**
+ * Resolves an import specifier from `sourcePath` against `allFiles` strictly by path first,
+ * only falling back to basename matching when there is a single unique match in the repository.
+ */
+function resolveImportTarget(sourcePath: string, imp: string, allFiles: FileSkeleton[]): FileSkeleton | null {
+  const impClean = imp.trim().replace(/['"]/g, "");
+  if (!impClean) return null;
+
+  const stripExt = (p: string) => p.replace(/\.(tsx?|jsx?|mjs|cjs|py)$/i, "");
+  const norm = (p: string) => p.replace(/^\.?\//, "").toLowerCase();
+
+  // 1. Relative import resolution (./foo, ../bar/charts)
+  if (impClean.startsWith(".")) {
+    const srcDir = sourcePath.replace(/^\.?\//, "").split("/").slice(0, -1);
+    const parts = impClean.split("/");
+    const resolved = [...srcDir];
+    for (const part of parts) {
+      if (part === "." || part === "") continue;
+      if (part === "..") resolved.pop();
+      else resolved.push(part);
+    }
+    const targetPrefix = resolved.join("/").toLowerCase();
+    const match = allFiles.find((f) => {
+      if (f.filePath === sourcePath) return false;
+      const fNoExt = stripExt(norm(f.filePath));
+      return fNoExt === targetPrefix || fNoExt === `${targetPrefix}/index` || fNoExt === `${targetPrefix}/__init__`;
+    });
+    if (match) return match;
+    return null; // Never mismatch relative imports to unrelated folders
+  }
+
+  // 2. Alias / absolute project path resolution (@/components/Foo, lib/bar)
+  const impNoAlias = stripExt(impClean.replace(/^[@~]\//, "").toLowerCase());
+  const exactOrSuffixMatches = allFiles.filter((f) => {
+    if (f.filePath === sourcePath) return false;
+    const fNoExt = stripExt(norm(f.filePath));
+    return fNoExt === impNoAlias || fNoExt.endsWith(`/${impNoAlias}`) || fNoExt === `${impNoAlias}/index`;
+  });
+  if (exactOrSuffixMatches.length === 1) {
+    return exactOrSuffixMatches[0];
+  }
+
+  // 3. Unique basename fallback only if unambiguous across the entire repo
+  const impBase = impNoAlias.split("/").pop();
+  if (impBase && impBase.length > 2) {
+    const baseMatches = allFiles.filter((f) => {
+      if (f.filePath === sourcePath) return false;
+      const fBase = stripExt(norm(f.filePath).split("/").pop() || "");
+      return fBase === impBase;
+    });
+    if (baseMatches.length === 1) {
+      return baseMatches[0];
+    }
+  }
+
+  return null;
+}
+
+/**
  * Infer human-friendly role purpose and capabilities for a file.
  */
 function inferFileDetails(file: FileSkeleton): {
@@ -518,6 +608,7 @@ function generateZoneBasedDiagram(skeleton: RepoSkeleton): {
     lines.push(`  subgraph ${zone.id} ["<b>${sanitizeMermaidText(zone.name)}</b><br/><small><i>${sanitizeMermaidText(zone.description)}</i></small>"]`);
     lines.push(`    direction TB`);
 
+    const allPaths = files.map((f) => f.filePath);
     const nodeIds: string[] = [];
     zone.files.forEach((file) => {
       const cleanPath = file.filePath.replace(/^\.?\//, "");
@@ -526,11 +617,12 @@ function generateZoneBasedDiagram(skeleton: RepoSkeleton): {
       if (!firstNodeId) firstNodeId = safeId;
       nodeIds.push(safeId);
 
-      const baseName = cleanPath.split("/").pop() || cleanPath;
+      const displayTitle = getDisambiguatedTitle(file.filePath, allPaths);
       const { icon, purpose, capabilities } = inferFileDetails(file);
+      const pathLine = cleanPath.includes("/") ? `<br/><small><code>${sanitizeMermaidText(cleanPath)}</code></small>` : "";
 
       lines.push(
-        `    ${safeId}["<b>${icon} ${sanitizeMermaidText(baseName)}</b><br/><small>${sanitizeMermaidText(purpose)}</small><br/><small>⚡ <code>${sanitizeMermaidText(capabilities)}</code></small>"]`
+        `    ${safeId}["<b>${icon} ${sanitizeMermaidText(displayTitle)}</b>${pathLine}<br/><small>${sanitizeMermaidText(purpose)}</small><br/><small>⚡ <code>${sanitizeMermaidText(capabilities)}</code></small>"]`
       );
     });
 
@@ -580,17 +672,14 @@ function generateZoneBasedDiagram(skeleton: RepoSkeleton): {
     const srcId = fileToNodeId.get(file.filePath);
     if (!srcId) return;
 
-    // Direct imports
+    // Direct imports (strictly path-resolved so duplicate basenames never cross-wire)
     (file.imports || []).forEach((imp) => {
-      const impClean = imp.toLowerCase();
-      files.forEach((targetFile) => {
-        if (targetFile.filePath === file.filePath) return;
-        const targetBase = targetFile.filePath.split("/").pop()?.toLowerCase().replace(/\.[^/.]+$/, "");
-        if (targetBase && (impClean.includes(targetBase) || targetBase.includes(impClean))) {
-          const tgtId = fileToNodeId.get(targetFile.filePath);
-          if (tgtId) addEdge(srcId, tgtId, `imports ${targetBase}`);
-        }
-      });
+      const targetFile = resolveImportTarget(file.filePath, imp, files);
+      if (targetFile) {
+        const tgtId = fileToNodeId.get(targetFile.filePath);
+        const targetLabel = targetFile.filePath.split("/").pop()?.replace(/\.[^/.]+$/, "") || imp;
+        if (tgtId) addEdge(srcId, tgtId, `imports ${targetLabel}`);
+      }
     });
 
     // Cross-file symbol calls
@@ -717,6 +806,7 @@ function generateFolderBasedDiagram(skeleton: RepoSkeleton): {
     const primaryFiles = folder.files.slice(0, maxFiles);
     const remainingFiles = folder.files.slice(maxFiles);
 
+    const allPaths = files.map((f) => f.filePath);
     primaryFiles.forEach((file) => {
       const cleanPath = file.filePath.replace(/^\.?\//, "");
       const safeId = `node_${cleanPath.replace(/[^a-zA-Z0-9_]/g, "_")}`;
@@ -724,11 +814,12 @@ function generateFolderBasedDiagram(skeleton: RepoSkeleton): {
       if (!firstNodeId) firstNodeId = safeId;
       nodeIds.push(safeId);
 
-      const baseName = cleanPath.split("/").pop() || cleanPath;
+      const displayTitle = getDisambiguatedTitle(file.filePath, allPaths);
       const { icon, purpose, capabilities } = inferFileDetails(file);
+      const pathLine = cleanPath.includes("/") ? `<br/><small><code>${sanitizeMermaidText(cleanPath)}</code></small>` : "";
 
       lines.push(
-        `    ${safeId}["<b>${icon} ${sanitizeMermaidText(baseName)}</b><br/><small>${sanitizeMermaidText(purpose)}</small><br/><small>⚡ <code>${sanitizeMermaidText(capabilities)}</code></small>"]`
+        `    ${safeId}["<b>${icon} ${sanitizeMermaidText(displayTitle)}</b>${pathLine}<br/><small>${sanitizeMermaidText(purpose)}</small><br/><small>⚡ <code>${sanitizeMermaidText(capabilities)}</code></small>"]`
       );
     });
 
@@ -849,15 +940,19 @@ export function convertArchitectureMapToMermaid(
     lines.push(`  subgraph sub_${zone.toLowerCase()} ["<b>${meta.title}</b>"]`);
     lines.push(`    direction TB`);
 
+    const allPaths = nodes.map((n) => n.filePath);
     const nodeIds: string[] = [];
     zoneNodes.get(zone)!.forEach((node) => {
       const safeId = `node_${node.id.replace(/[^a-zA-Z0-9_]/g, "_")}`;
       if (!firstNodeId) firstNodeId = safeId;
       nodeIds.push(safeId);
 
-      const baseName = node.filePath.split("/").pop() || node.filePath;
+      const displayTitle = getDisambiguatedTitle(node.filePath, allPaths);
+      const pathLine = node.filePath.includes("/")
+        ? `<br/><small><code>${sanitizeMermaidText(node.filePath)}</code></small>`
+        : "";
       lines.push(
-        `    ${safeId}["<b>📄 ${sanitizeMermaidText(baseName)}</b><br/><small>${sanitizeMermaidText(node.summary || node.label)}</small>"]`
+        `    ${safeId}["<b>📄 ${sanitizeMermaidText(displayTitle)}</b>${pathLine}<br/><small>${sanitizeMermaidText(node.summary || node.label)}</small>"]`
       );
     });
 
@@ -881,4 +976,166 @@ export function convertArchitectureMapToMermaid(
     groupColors,
     entryNodeId: firstNodeId,
   };
+}
+
+/**
+ * Builds either the full expanded diagram or a progressive-disclosure Zone-Clustered
+ * Overview diagram where each zone/folder collapses into a summary card (`zone_cluster_*`)
+ * that can be expanded individually on click.
+ */
+export function buildProgressiveMermaidDiagram(params: {
+  skeleton: RepoSkeleton | null;
+  architectureMap: ArchitectureMap | null;
+  baseMermaidDef: string;
+  viewMode: "overview" | "expanded";
+  expandedZones: Set<string>;
+}): string {
+  const { skeleton, architectureMap, baseMermaidDef, viewMode, expandedZones } = params;
+  if (viewMode === "expanded") return baseMermaidDef;
+
+  const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_]/g, "_");
+
+  // Case 1: Backend ArchitectureMap is present
+  if (architectureMap && architectureMap.nodes && architectureMap.nodes.length > 0) {
+    const nodes = architectureMap.nodes;
+    const edges = architectureMap.edges || [];
+    const allPaths = nodes.map((n) => n.filePath);
+
+    // Group by zone, or by top-level folder if all nodes fall into a single zone
+    const distinctZones = new Set(nodes.map((n) => n.zone || "Services"));
+    const groupByFolder = distinctZones.size <= 1;
+
+    const groups = new Map<string, { title: string; items: MapNode[] }>();
+    const nodeToGroup = new Map<string, string>();
+
+    nodes.forEach((n) => {
+      const clean = n.filePath.replace(/^\.?\//, "");
+      const seg = clean.split("/")[0] || "root";
+      const key = groupByFolder ? sanitize(seg) : sanitize((n.zone || "Services").toLowerCase());
+      const title = groupByFolder ? `${seg}/` : n.zone || "Services";
+      if (!groups.has(key)) groups.set(key, { title, items: [] });
+      groups.get(key)!.items.push(n);
+      nodeToGroup.set(n.id, key);
+    });
+
+    const lines: string[] = ["flowchart LR"];
+    const nodeToRenderedId = new Map<string, string>();
+
+    groups.forEach((grp, key) => {
+      const isExpanded = expandedZones.has(key);
+      if (isExpanded) {
+        lines.push(`  subgraph sub_${key} ["<b>${sanitizeMermaidText(grp.title)} (${grp.items.length})</b> • <small><code>Collapse Zone −</code></small>"]`);
+        lines.push(`    direction TB`);
+        grp.items.forEach((node) => {
+          const nid = `node_${sanitize(node.id)}`;
+          nodeToRenderedId.set(node.id, nid);
+          const title = getDisambiguatedTitle(node.filePath, allPaths);
+          lines.push(
+            `    ${nid}["<b>📄 ${sanitizeMermaidText(title)}</b><br/><small>${sanitizeMermaidText(node.summary || node.label)}</small>"]`
+          );
+        });
+        lines.push("  end\n");
+      } else {
+        const clusterId = `zone_cluster_${key}`;
+        grp.items.forEach((node) => nodeToRenderedId.set(node.id, clusterId));
+        const preview = grp.items
+          .slice(0, 3)
+          .map((n) => getDisambiguatedTitle(n.filePath, allPaths))
+          .join(", ");
+        const more = grp.items.length > 3 ? ` +${grp.items.length - 3} more` : "";
+        lines.push(
+          `  ${clusterId}["<b>📦 ${sanitizeMermaidText(grp.title)} (${grp.items.length} files)</b><br/><small>${sanitizeMermaidText(preview + more)}</small><br/><small>⚡ <code>Expand Zone +</code></small>"]`
+        );
+      }
+    });
+
+    const addedEdges = new Set<string>();
+    edges.forEach((e) => {
+      const src = nodeToRenderedId.get(e.source);
+      const tgt = nodeToRenderedId.get(e.target);
+      if (src && tgt && src !== tgt) {
+        const edgeKey = `${src}->${tgt}`;
+        if (!addedEdges.has(edgeKey)) {
+          addedEdges.add(edgeKey);
+          const rel = src.startsWith("zone_cluster_") || tgt.startsWith("zone_cluster_") ? "depends on" : e.relation || "depends on";
+          lines.push(`  ${src} ==>|"${sanitizeMermaidText(rel)}"| ${tgt}`);
+        }
+      }
+    });
+
+    return lines.join("\n");
+  }
+
+  // Case 2: Client RepoSkeleton is present
+  if (skeleton && skeleton.files && skeleton.files.length > 0) {
+    const files = skeleton.files;
+    const allPaths = files.map((f) => f.filePath);
+    const groups = new Map<string, { title: string; files: FileSkeleton[] }>();
+
+    files.forEach((f) => {
+      const cat = getFolderCategory(f.filePath);
+      const key = sanitize(cat.id);
+      if (!groups.has(key)) groups.set(key, { title: cat.folderPath, files: [] });
+      groups.get(key)!.files.push(f);
+    });
+
+    const lines: string[] = ["flowchart LR"];
+    const fileToRenderedId = new Map<string, string>();
+
+    groups.forEach((grp, key) => {
+      const isExpanded = expandedZones.has(key);
+      if (isExpanded) {
+        lines.push(`  subgraph ${key} ["<b>📁 ${sanitizeMermaidText(grp.title)} (${grp.files.length})</b> • <small><code>Collapse Zone −</code></small>"]`);
+        lines.push(`    direction TB`);
+        grp.files.forEach((file) => {
+          const cleanPath = file.filePath.replace(/^\.?\//, "");
+          const nid = `node_${sanitize(cleanPath)}`;
+          fileToRenderedId.set(file.filePath, nid);
+          const title = getDisambiguatedTitle(file.filePath, allPaths);
+          const { icon, purpose } = inferFileDetails(file);
+          lines.push(
+            `    ${nid}["<b>${icon} ${sanitizeMermaidText(title)}</b><br/><small>${sanitizeMermaidText(purpose)}</small>"]`
+          );
+        });
+        lines.push("  end\n");
+      } else {
+        const clusterId = `zone_cluster_${key}`;
+        grp.files.forEach((f) => fileToRenderedId.set(f.filePath, clusterId));
+        const preview = grp.files
+          .slice(0, 3)
+          .map((f) => getDisambiguatedTitle(f.filePath, allPaths))
+          .join(", ");
+        const more = grp.files.length > 3 ? ` +${grp.files.length - 3} more` : "";
+        lines.push(
+          `  ${clusterId}["<b>📦 ${sanitizeMermaidText(grp.title)} (${grp.files.length} files)</b><br/><small>${sanitizeMermaidText(preview + more)}</small><br/><small>⚡ <code>Expand Zone +</code></small>"]`
+        );
+      }
+    });
+
+    const addedEdges = new Set<string>();
+    files.forEach((file) => {
+      const src = fileToRenderedId.get(file.filePath);
+      if (!src) return;
+      (file.imports || []).forEach((imp) => {
+        const targetFile = resolveImportTarget(file.filePath, imp, files);
+        if (!targetFile) return;
+        const tgt = fileToRenderedId.get(targetFile.filePath);
+        if (tgt && src !== tgt) {
+          const edgeKey = `${src}->${tgt}`;
+          if (!addedEdges.has(edgeKey)) {
+            addedEdges.add(edgeKey);
+            const rel =
+              src.startsWith("zone_cluster_") || tgt.startsWith("zone_cluster_")
+                ? "imports"
+                : `imports ${targetFile.filePath.split("/").pop()?.replace(/\.[^/.]+$/, "") || ""}`;
+            lines.push(`  ${src} ==>|"${sanitizeMermaidText(rel)}"| ${tgt}`);
+          }
+        }
+      });
+    });
+
+    return lines.join("\n");
+  }
+
+  return baseMermaidDef;
 }

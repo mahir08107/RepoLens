@@ -27,7 +27,7 @@ import { fetchUserRepositories, GitHubRepoItem } from '@/frontend/src/services/f
 interface TopBarProps {
   onGenerate: (repoUrl: string) => void;
   onOpenInspector: () => void;
-  onLoadDemo: () => void;
+  onLoadDemo?: () => void;
   loading: boolean;
   statusText?: string;
   error?: string | null;
@@ -234,10 +234,13 @@ const TopBar: React.FC<TopBarProps> = ({
           </span>
         </div>
 
-        {/* 2. Center: GitHub Primer Input Group + 1-Click Your Repositories Picker */}
-        <div className="flex items-center flex-1 max-w-2xl mx-2 gap-1.5 relative" ref={dropdownRef}>
+        {/* 2. Center: Unified GitHub Primer Input Group ([ Your Repos ▾ | 🔗 URL × | Analyze ]) */}
+        <div
+          className="flex items-center flex-1 max-w-2xl mx-2 h-8 rounded-md border border-[#d0d7de] bg-white shadow-2xs focus-within:border-[#0969da] focus-within:ring-2 focus-within:ring-[#0969da]/20 transition-all relative"
+          ref={dropdownRef}
+        >
           {currentUser && (
-            <div className="relative shrink-0">
+            <div className="relative h-full shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -247,10 +250,10 @@ const TopBar: React.FC<TopBarProps> = ({
                     loadUserRepos(githubAccessToken);
                   }
                 }}
-                className={`h-8 px-2.5 text-xs font-medium rounded-md border flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                className={`h-full px-2.5 text-xs font-medium rounded-l-[5px] border-r border-[#d0d7de] flex items-center space-x-1.5 transition-colors cursor-pointer ${
                   repoDropdownOpen
-                    ? 'bg-[#eaeef2] border-[#0969da] text-[#1f2328]'
-                    : 'bg-white hover:bg-[#f6f8fa] border-[#d0d7de] text-[#24292f]'
+                    ? 'bg-[#eaeef2] text-[#1f2328]'
+                    : 'bg-[#f6f8fa] hover:bg-[#eaeef2] text-[#24292f]'
                 }`}
                 title="Pick one of your public or private GitHub repositories"
               >
@@ -375,8 +378,8 @@ const TopBar: React.FC<TopBarProps> = ({
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="flex-1 min-w-0">
-            <div className="flex items-center w-full h-8 rounded-md border border-[#d0d7de] bg-white shadow-2xs overflow-hidden focus-within:border-[#0969da] focus-within:ring-2 focus-within:ring-[#0969da]/20 transition-all">
+          <form onSubmit={handleSubmit} className="flex-1 h-full min-w-0">
+            <div className="flex items-center w-full h-full">
               <div className="pl-2.5 pr-1.5 text-[#656d76] flex items-center pointer-events-none shrink-0">
                 <GitBranch className="w-3.5 h-3.5" />
               </div>
@@ -404,7 +407,7 @@ const TopBar: React.FC<TopBarProps> = ({
               <button
                 type="submit"
                 disabled={loading || !url.trim()}
-                className="h-full px-3.5 bg-[#1f883d] hover:bg-[#1a7f37] active:bg-[#176f30] text-white text-xs font-medium border-l border-[#d0d7de] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-1.5 shrink-0 transition-colors"
+                className="h-full px-3.5 rounded-r-[5px] bg-[#1f883d] hover:bg-[#1a7f37] active:bg-[#176f30] text-white text-xs font-medium border-l border-[#d0d7de] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-1.5 shrink-0 transition-colors"
               >
                 {loading ? (
                   <>
@@ -419,27 +422,17 @@ const TopBar: React.FC<TopBarProps> = ({
           </form>
         </div>
 
-        {/* 3. Right: Compact Primer Buttons (Demo, AST, Copilot, Sign In) */}
+        {/* 3. Right: Compact Primer Buttons (AST Payload, Copilot, Sign In) */}
         <div className="flex items-center space-x-2 shrink-0">
-          {/* Demo Button */}
-          <button
-            type="button"
-            onClick={onLoadDemo}
-            title="Load sample architecture map"
-            className="h-8 px-2.5 text-xs font-medium text-[#24292f] bg-[#f6f8fa] hover:bg-[#eaeef2] active:bg-[#e1e4e8] border border-[#d0d7de] rounded-md transition-colors cursor-pointer"
-          >
-            Demo
-          </button>
-
           {/* Payload Inspector Button */}
           <button
             type="button"
             onClick={onOpenInspector}
-            className="h-8 px-2.5 text-xs font-medium text-[#24292f] bg-[#f6f8fa] hover:bg-[#eaeef2] active:bg-[#e1e4e8] border border-[#d0d7de] rounded-md flex items-center space-x-1 transition-colors cursor-pointer"
+            className="h-8 px-2.5 text-xs font-medium text-[#24292f] bg-[#f6f8fa] hover:bg-[#eaeef2] active:bg-[#e1e4e8] border border-[#d0d7de] rounded-md flex items-center space-x-1.5 transition-colors cursor-pointer"
             title="Inspect privacy-sanitized AST payload"
           >
             <Code2 className="w-3.5 h-3.5 text-[#656d76]" />
-            <span>AST</span>
+            <span>AST Payload</span>
           </button>
 
           {/* Copilot Toggle Button */}

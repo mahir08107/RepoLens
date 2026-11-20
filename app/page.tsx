@@ -83,25 +83,25 @@ export default function LandingPage() {
 
           <div className="flex items-center space-x-2.5">
             {user ? (
-              <div className="flex items-center space-x-2">
-                <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-white border border-[#d0d7de] text-xs text-[#1f2328]">
+              <div className="flex items-center gap-2.5">
+                <div className="hidden sm:inline-flex h-9 px-3 items-center gap-2 rounded-md border border-[#d0d7de] bg-[#ffffff] text-sm font-medium text-[#1f2328]">
                   {user.photoURL && (
                     <img
                       src={user.photoURL}
                       alt={user.displayName || 'User'}
-                      className="w-4 h-4 rounded-full border border-[#d0d7de]"
+                      className="h-5 w-5 rounded-full border border-[#d0d7de] object-cover"
                     />
                   )}
-                  <span className="font-medium">
+                  <span>
                     {user.username || user.displayName || 'Signed in'}
                   </span>
                 </div>
                 <Link
                   href="/dashboard"
-                  className="h-8 px-3.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-white text-xs font-medium inline-flex items-center space-x-1.5 transition-colors"
+                  className="h-9 px-4 inline-flex items-center gap-1.5 rounded-md bg-[#1f883d] hover:bg-[#1a7f37] text-sm font-medium text-white transition-colors"
                 >
                   <span>Open Workspace</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <ArrowRight className="w-4 h-4" />
                 </Link>
               </div>
             ) : (

@@ -1,6 +1,6 @@
 'use client';
 import React from "react";
-import { X, FileCode2, ArrowUpRight, ArrowDownLeft, Sparkles, Copy, Check } from "lucide-react";
+import { X, FileCode2, ArrowUpRight, ArrowDownLeft, MessageSquareCode, Copy, Check, Focus } from "lucide-react";
 import type { CanvasNode, NodeRegistry } from "@/lib/node-registry";
 
 interface NodeInspectorProps {
@@ -11,6 +11,8 @@ interface NodeInspectorProps {
   onFocusNode: (id: string) => void;
   onHighlightGroup?: (ids: string[]) => void;
   onOpenCopilot?: () => void;
+  isNeighborhoodFocused?: boolean;
+  onToggleNeighborhoodFocus?: () => void;
 }
 
 /**
@@ -25,6 +27,8 @@ const NodeInspector: React.FC<NodeInspectorProps> = ({
   onFocusNode,
   onHighlightGroup,
   onOpenCopilot,
+  isNeighborhoodFocused = false,
+  onToggleNeighborhoodFocus,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const outgoing = registry.outgoing(node.id);
@@ -131,13 +135,33 @@ const NodeInspector: React.FC<NodeInspectorProps> = ({
         </button>
       </div>
 
+      {/* Focus Neighborhood (1-Hop) Toggle Pill */}
+      {onToggleNeighborhoodFocus && (
+        <button
+          type="button"
+          onClick={onToggleNeighborhoodFocus}
+          className={`w-full mb-2 flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors cursor-pointer ${
+            isNeighborhoodFocused
+              ? "bg-[#ddf4ff] border-[#0969da] text-[#0969da] font-semibold"
+              : "bg-[#f6f8fa] hover:bg-[#eaeef2] border-[#d0d7de] text-[#1f2328] font-medium"
+          }`}
+        >
+          <Focus className="w-3.5 h-3.5 shrink-0" />
+          <span>
+            {isNeighborhoodFocused
+              ? "✓ Focusing 1-Hop Neighborhood (Click to Show All)"
+              : "Focus Neighborhood (1-Hop)"}
+          </span>
+        </button>
+      )}
+
       {/* 4. Primary CTA Button: GitHub-styled "Ask Copilot about this file" */}
       <button
         type="button"
         onClick={onOpenCopilot}
         className="w-full flex items-center justify-center space-x-2 px-3 py-1.5 rounded-lg bg-[#1f2328] hover:bg-[#24292f] active:bg-[#0f1114] text-white text-xs font-medium transition-all shadow-xs cursor-pointer"
       >
-        <Sparkles className="w-3.5 h-3.5 text-[#79c0ff]" />
+        <MessageSquareCode className="w-3.5 h-3.5 text-[#79c0ff]" />
         <span>Ask Copilot about this file →</span>
       </button>
     </div>

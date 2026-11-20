@@ -20,6 +20,14 @@ interface MermaidCanvasProps {
   onBackgroundClick?: () => void;
   /** Pan and zoom the canvas so this node is centred, or '__RESET__' to fit entire diagram. */
   focusRequest?: FocusRequest | null;
+  /** Progressive disclosure view mode */
+  viewMode?: "overview" | "expanded";
+  onViewModeChange?: (mode: "overview" | "expanded") => void;
+  /** 1-Hop Focus Neighborhood isolation mode */
+  isFocusNeighborhood?: boolean;
+  /** Expand or collapse a specific zone cluster in Overview mode */
+  onExpandZone?: (zoneKey: string) => void;
+  onCollapseZone?: (zoneKey: string) => void;
 }
 
 interface MiniNodeRect {
@@ -156,7 +164,16 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
   onNodeSelect,
   onBackgroundClick,
   focusRequest = null,
+  viewMode = "expanded",
+  onViewModeChange,
+  isFocusNeighborhood = false,
+  onExpandZone,
+  onCollapseZone,
 }) => {
+  const onExpandZoneRef = useRef(onExpandZone);
+  onExpandZoneRef.current = onExpandZone;
+  const onCollapseZoneRef = useRef(onCollapseZone);
+  onCollapseZoneRef.current = onCollapseZone;
   const viewportRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -366,12 +383,20 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
         nodes.forEach((node) => {
           const id = canonicalNodeId(node);
           node.setAttribute("data-rl-id", id);
+          const isZoneCluster =
+            id.startsWith("zone_cluster_") ||
+            id.startsWith("zone-cluster:") ||
+            Boolean(node.textContent?.includes("Expand Zone +"));
 
           const clickHandler = (e: Event) => {
             e.stopPropagation();
             if (dragRef.current.moved) return;
-            const targetId = (e.currentTarget as Element)?.getAttribute("data-rl-id") || id;
-            onNodeSelectRef.current(targetId);
+            if (isZoneCluster) {
+              const zoneKey = id.replace(/^zone_cluster_/, "").replace(/^zone-cluster:/, "");
+              onExpandZoneRef.current?.(zoneKey);
+              return;
+            }
+            onNodeSelectRef.current(id);
           };
 
           node.addEventListener("click", clickHandler);
@@ -396,11 +421,25 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
           } catch {}
         });
 
-        // 2. Extract cluster subgraphs
+        // 2. Extract cluster subgraphs & attach Collapse Zone handler when present
         const clusters = svgEl.querySelectorAll("g.cluster");
         const parsedClusters: MiniClusterRect[] = [];
         clusters.forEach((c) => {
           try {
+            const labelText = c.querySelector(".nodeLabel")?.textContent?.trim() || "";
+            if (labelText.includes("Collapse Zone")) {
+              const clusterEl = c as SVGGElement;
+              clusterEl.style.cursor = "pointer";
+              const labelEl = c.querySelector(".cluster-label, .nodeLabel, foreignObject");
+              if (labelEl) {
+                labelEl.addEventListener("click", (e: Event) => {
+                  e.stopPropagation();
+                  if (dragRef.current.moved) return;
+                  const zoneKey = (c.id || "").replace(/^sub_/, "");
+                  if (zoneKey) onCollapseZoneRef.current?.(zoneKey);
+                });
+              }
+            }
             const b = (c as SVGGraphicsElement).getBBox();
             parsedClusters.push({
               id: c.id || "cluster",
@@ -408,9 +447,42 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
               y: b.y,
               width: b.width,
               height: b.height,
-              label: c.querySelector(".nodeLabel")?.textContent?.trim() || "",
+              label: labelText,
             });
           } catch {}
+        });
+
+        // 2b. Clean up & resize edge labels so they are never clipped
+        svgEl.querySelectorAll("g.edgeLabel").forEach((edgeLabelEl) => {
+          const gEl = edgeLabelEl as SVGGElement;
+          const fo = gEl.querySelector("foreignObject");
+          const labelSpan = gEl.querySelector(".edgeLabel, .labelBkg, span, p") as HTMLElement | null;
+          const rawText = (labelSpan?.textContent || gEl.textContent || "").trim();
+          const cleanedText = rawText.replace(/^\(+|\)+$/g, "").trim();
+
+          if (!cleanedText) {
+            gEl.style.display = "none";
+            return;
+          }
+
+          if (labelSpan && labelSpan.textContent !== cleanedText && labelSpan.children.length === 0) {
+            labelSpan.textContent = cleanedText;
+          }
+
+          if (fo && labelSpan) {
+            try {
+              const targetEl = (gEl.querySelector(".labelBkg") as HTMLElement | null) || labelSpan;
+              const measuredW = Math.max(targetEl.scrollWidth, targetEl.offsetWidth, cleanedText.length * 6.5);
+              const measuredH = Math.max(targetEl.scrollHeight, targetEl.offsetHeight, 18);
+              const newW = Math.ceil(measuredW + 16);
+              const newH = Math.ceil(measuredH + 6);
+              fo.setAttribute("width", String(newW));
+              fo.setAttribute("height", String(newH));
+              fo.setAttribute("x", String(-newW / 2));
+              fo.setAttribute("y", String(-newH / 2));
+              fo.style.overflow = "visible";
+            } catch {}
+          }
         });
 
         // 3. Capture overall SVG BBox
@@ -481,30 +553,44 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
     svg.querySelectorAll("g.node").forEach((node) => {
       const id = node.getAttribute("data-rl-id") || canonicalNodeId(node);
       const isSelected = id === selectedId;
-      const isHighlighted = highlighted.has(id) && !isSelected;
-      const isOutNeighbor = !dimMode && outgoingNeighbors.has(id);
-      const isInNeighbor = !dimMode && incomingNeighbors.has(id);
-      const isDimmed = (selectedId !== null || dimMode) && !isSelected && !isHighlighted && !isOutNeighbor && !isInNeighbor;
+      const isOutNeighbor = outgoingNeighbors.has(id);
+      const isInNeighbor = incomingNeighbors.has(id);
+      const isDirectNeighbor = isOutNeighbor || isInNeighbor;
+      const isHighlighted = !isFocusNeighborhood && highlighted.has(id) && !isSelected;
+
+      const isNeighborhoodDimmed =
+        isFocusNeighborhood && selectedId !== null && !isSelected && !isDirectNeighbor;
+      const isDimmed =
+        !isNeighborhoodDimmed &&
+        (selectedId !== null || dimMode) &&
+        !isSelected &&
+        !isHighlighted &&
+        !isDirectNeighbor;
 
       node.classList.toggle("selected-node", isSelected);
       node.classList.toggle("highlighted-node", isHighlighted);
-      node.classList.toggle("neighbor-outgoing", isOutNeighbor);
-      node.classList.toggle("neighbor-incoming", isInNeighbor);
+      node.classList.toggle("neighbor-outgoing", isOutNeighbor && (!dimMode || isFocusNeighborhood));
+      node.classList.toggle("neighbor-incoming", isInNeighbor && (!dimMode || isFocusNeighborhood));
       node.classList.toggle("dimmed-node", isDimmed);
+      node.classList.toggle("neighborhood-dimmed-node", isNeighborhoodDimmed);
     });
 
     const anySelection = selectedId !== null || dimMode;
     svg.querySelectorAll("path.flowchart-link, g.edgePaths path, g.edgePath path").forEach((link) => {
       const isOut = outgoingEdges.some((e) => linkMatchesEdge(link, e));
       const isIn = incomingEdges.some((e) => linkMatchesEdge(link, e));
-      const isOtherActive = otherActiveEdges.some((e) => linkMatchesEdge(link, e));
+      const isOtherActive = !isFocusNeighborhood && otherActiveEdges.some((e) => linkMatchesEdge(link, e));
+
+      const isNeighborhoodHidden =
+        isFocusNeighborhood && selectedId !== null && !isOut && !isIn;
 
       link.classList.toggle("edge-outgoing", isOut);
       link.classList.toggle("edge-incoming", isIn);
       link.classList.toggle("edge-active", isOtherActive);
-      link.classList.toggle("edge-dimmed", anySelection && !isOut && !isIn && !isOtherActive);
+      link.classList.toggle("edge-dimmed", !isNeighborhoodHidden && anySelection && !isOut && !isIn && !isOtherActive);
+      link.classList.toggle("edge-neighborhood-hidden", isNeighborhoodHidden);
     });
-  }, [selectedId, highlightedIds, edges, svgVersion]);
+  }, [selectedId, highlightedIds, edges, svgVersion, isFocusNeighborhood]);
 
   // Handle native scroll to update mini-map position (throttled with rAF)
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -645,6 +731,11 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
     if (nodeEl) {
       e.stopPropagation();
       const id = nodeEl.getAttribute("data-rl-id") || canonicalNodeId(nodeEl);
+      if (id.startsWith("zone_cluster_") || id.startsWith("zone-cluster:") || nodeEl.textContent?.includes("Expand Zone +")) {
+        const zoneKey = id.replace(/^zone_cluster_/, "").replace(/^zone-cluster:/, "");
+        onExpandZoneRef.current?.(zoneKey);
+        return;
+      }
       if (id) {
         onNodeSelectRef.current(id);
       }
@@ -836,7 +927,7 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
     onClick: (e: React.MouseEvent) => e.stopPropagation(),
   };
 
-  const isZoomLow = zoom < 0.75;
+  const isZoomLow = zoom < 0.7;
 
   return (
     <div
@@ -897,8 +988,38 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
       {/* 2. Floating Toolbar Controls (Top-Right) */}
       <div
         {...stopCanvasEvents}
-        className="absolute top-3.5 right-3.5 z-20 flex items-center bg-white/95 backdrop-blur-md border border-[#d0d7de] rounded-lg shadow-2xs p-0.5 space-x-0.5 cursor-default"
+        className="absolute top-3.5 right-3.5 z-20 flex items-center gap-2 cursor-default"
       >
+        {onViewModeChange && (
+          <div className="flex items-center bg-white/95 backdrop-blur-md border border-[#d0d7de] rounded-lg shadow-2xs p-0.5 text-[11px] font-medium">
+            <button
+              type="button"
+              onClick={() => onViewModeChange("overview")}
+              className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                viewMode === "overview"
+                  ? "bg-[#0969da] text-white shadow-2xs"
+                  : "text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa]"
+              }`}
+              title="Group files by zone/folder (click any zone to expand)"
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewModeChange("expanded")}
+              className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                viewMode === "expanded"
+                  ? "bg-[#0969da] text-white shadow-2xs"
+                  : "text-[#656d76] hover:text-[#1f2328] hover:bg-[#f6f8fa]"
+              }`}
+              title="Expand all file nodes across every zone"
+            >
+              Expand All
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center bg-white/95 backdrop-blur-md border border-[#d0d7de] rounded-lg shadow-2xs p-0.5 space-x-0.5">
         <button
           type="button"
           onClick={() => zoomBy(ZOOM_STEP)}
@@ -947,6 +1068,7 @@ const MermaidCanvas: React.FC<MermaidCanvasProps> = ({
             </>
           )}
         </button>
+        </div>
       </div>
 
       {/* 3. Bottom-Left: Live Zoom Badge & Navigation Hints */}
