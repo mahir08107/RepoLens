@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { mapRouter } from './routes/mapRoute.js';
 import { chatRouter } from './routes/chatRoute.js';
+import { feedbackRouter } from './routes/feedbackRoute.js';
 
 dotenv.config();
 
@@ -21,6 +22,7 @@ app.get('/health', (_req, res) => {
 // Mount routes under /api
 app.use('/api', mapRouter);
 app.use('/api', chatRouter);
+app.use('/api', feedbackRouter);
 
 // Start server if run directly
 if (process.env.NODE_ENV !== 'test') {

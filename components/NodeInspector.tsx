@@ -55,7 +55,7 @@ const NodeInspector: React.FC<NodeInspectorProps> = ({
   };
 
   return (
-    <div className="absolute bottom-4 left-4 z-20 w-[350px] max-w-sm bg-white border border-[#d0d7de] rounded-xl shadow-lg p-3.5 text-xs animate-in fade-in slide-in-from-bottom-2 select-text">
+    <div className="absolute bottom-3 left-3 right-3 sm:bottom-4 sm:left-4 sm:right-auto z-20 w-auto sm:w-[350px] sm:max-w-sm bg-white border border-[#d0d7de] rounded-xl shadow-lg p-3.5 text-xs animate-in fade-in slide-in-from-bottom-2 select-text">
       {/* 1. Header: Zone Badge + Monospace filePath + Close Button */}
       <div className="flex items-start justify-between gap-2 mb-2 pb-2 border-b border-[#d0d7de]">
         <div className="min-w-0 flex-1">
@@ -142,26 +142,26 @@ const NodeInspector: React.FC<NodeInspectorProps> = ({
           onClick={onToggleNeighborhoodFocus}
           className={`w-full mb-2 flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors cursor-pointer ${
             isNeighborhoodFocused
-              ? "bg-[#ddf4ff] border-[#0969da] text-[#0969da] font-semibold"
-              : "bg-[#f6f8fa] hover:bg-[#eaeef2] border-[#d0d7de] text-[#1f2328] font-medium"
+              ? "bg-[#09090B] border-[#09090B] text-white font-semibold"
+              : "bg-[#F4F4F5] hover:bg-[#E4E4E7] border-[#D4D4D8] text-[#09090B] font-medium"
           }`}
         >
           <Focus className="w-3.5 h-3.5 shrink-0" />
           <span>
             {isNeighborhoodFocused
-              ? "✓ Focusing 1-Hop Neighborhood (Click to Show All)"
+              ? "✓ 1-Hop Neighborhood Active (Show All)"
               : "Focus Neighborhood (1-Hop)"}
           </span>
         </button>
       )}
 
-      {/* 4. Primary CTA Button: GitHub-styled "Ask Copilot about this file" */}
+      {/* 4. Primary CTA Button: Ask Copilot */}
       <button
         type="button"
         onClick={onOpenCopilot}
-        className="w-full flex items-center justify-center space-x-2 px-3 py-1.5 rounded-lg bg-[#1f2328] hover:bg-[#24292f] active:bg-[#0f1114] text-white text-xs font-medium transition-all shadow-xs cursor-pointer"
+        className="w-full flex items-center justify-center space-x-2 px-3 py-1.5 rounded-lg bg-[#09090B] hover:bg-[#18181B] text-white text-xs font-medium transition-all shadow-xs cursor-pointer"
       >
-        <MessageSquareCode className="w-3.5 h-3.5 text-[#79c0ff]" />
+        <MessageSquareCode className="w-3.5 h-3.5 text-[#A1A1AA]" />
         <span>Ask Copilot about this file →</span>
       </button>
     </div>
