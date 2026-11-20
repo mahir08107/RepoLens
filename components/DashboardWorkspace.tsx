@@ -12,12 +12,12 @@ import {
   MOCK_ZONE_COLORS,
 } from "@/frontend/src/mocks/mockData";
 import {
-  Compass,
   Layers,
-  ArrowRight,
   Search,
   X,
   RotateCcw,
+  ArrowUpRight,
+  Monitor,
 } from "lucide-react";
 import type { ArchitectureMap, RepoSkeleton } from "@/shared/types";
 import { parseRepo } from "@/lib/ast-parser";
@@ -38,12 +38,13 @@ const MermaidCanvas = dynamic(() => import("@/components/MermaidCanvas"), {
 export default function DashboardWorkspace() {
   const searchParams = useSearchParams();
   const initialRepoParam = searchParams.get("repo");
-  const { githubAccessToken } = useAuth();
+  const { user, githubAccessToken, signInWithGithub } = useAuth();
 
-  const [skeleton, setSkeleton] = useState<RepoSkeleton | null>(MOCK_REPO_SKELETON);
+  const [activeRepoUrl, setActiveRepoUrl] = useState<string>(initialRepoParam || "");
+  const [skeleton, setSkeleton] = useState<RepoSkeleton | null>(null);
   const [architectureMap, setArchitectureMap] = useState<ArchitectureMap | null>(null);
-  const [mermaidDef, setMermaidDef] = useState<string>(MOCK_MERMAID_DEFINITION);
-  const [legend, setLegend] = useState<Record<string, string>>(MOCK_ZONE_COLORS);
+  const [mermaidDef, setMermaidDef] = useState<string>("");
+  const [legend, setLegend] = useState<Record<string, string>>({});
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [highlightedIds, setHighlightedIds] = useState<string[]>([]);
@@ -53,6 +54,7 @@ export default function DashboardWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
+  const [showMobileDesktopBanner, setShowMobileDesktopBanner] = useState<boolean>(true);
 
   const [activeZoneFilter, setActiveZoneFilter] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"overview" | "expanded">("expanded");
@@ -69,7 +71,7 @@ export default function DashboardWorkspace() {
     }
   }, []);
 
-  const effectiveMermaidDef = useMemo(
+  const progressiveDiagram = useMemo(
     () =>
       buildProgressiveMermaidDiagram({
         skeleton,
@@ -80,6 +82,8 @@ export default function DashboardWorkspace() {
       }),
     [skeleton, architectureMap, mermaidDef, viewMode, expandedZones]
   );
+
+  const effectiveMermaidDef = progressiveDiagram.mermaidDefinition;
 
   const registry = useMemo(
     () => buildNodeRegistry(effectiveMermaidDef, skeleton, architectureMap),
@@ -176,6 +180,7 @@ export default function DashboardWorkspace() {
   }, []);
 
   const handleGenerate = useCallback(async (url: string) => {
+    setActiveRepoUrl(url);
     setLoading(true);
     setStatusText("Fetching repo tree & stripping bodies locally...");
     setError(null);
@@ -358,10 +363,31 @@ export default function DashboardWorkspace() {
         isCopilotOpen={isCopilotOpen}
         onToggleCopilot={() => setIsCopilotOpen((v) => !v)}
         hasActiveSelection={Boolean(selectedNode)}
-        initialRepoUrl={initialRepoParam || undefined}
+        initialRepoUrl={activeRepoUrl}
       />
 
-      <div className="h-[44px] min-h-[44px] bg-[#ffffff] border-b border-[#d0d7de] px-4 flex items-center justify-between text-xs z-20 shrink-0 gap-3 select-none">
+      {/* Subtle Dismissible "Best on Desktop" Notice Banner (Mobile < 768px only) */}
+      {showMobileDesktopBanner && (
+        <div className="md:hidden bg-[#18181B] text-[#FAFAFA] border-b border-[#27272A] px-4 py-2.5 flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Monitor className="w-4 h-4 text-[#A1A1AA] shrink-0" />
+            <span className="leading-snug text-[#E4E4E7]">
+              Interactive dependency graphs are best experienced on a desktop screen. Pinch or drag to pan.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowMobileDesktopBanner(false)}
+            className="text-[#A1A1AA] hover:text-white font-mono text-[11px] shrink-0 inline-flex items-center gap-1 cursor-pointer"
+          >
+            <span>Dismiss</span>
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {effectiveMermaidDef && (
+      <div className="h-[44px] min-h-[44px] bg-[#ffffff] border-b border-[#E4E4E7] px-4 flex items-center justify-between text-xs z-20 shrink-0 gap-3 select-none">
         <div className="flex items-center space-x-1.5 overflow-x-auto py-1 flex-1 min-w-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <div className="flex items-center space-x-1.5 shrink-0 pr-1.5 border-r border-[#d0d7de]">
             <Layers className="w-3.5 h-3.5 text-[#656d76]" />
@@ -375,8 +401,8 @@ export default function DashboardWorkspace() {
             onClick={() => handleZoneFilter(null)}
             className={`h-7 flex items-center space-x-1.5 px-2.5 rounded-md text-[11px] font-medium transition-all cursor-pointer shrink-0 border ${
               activeZoneFilter === null
-                ? "bg-[#0969da] text-white border-[#0969da] shadow-2xs"
-                : "bg-[#f6f8fa] hover:bg-[#eaeef2] text-[#1f2328] border-[#d0d7de]"
+                ? "bg-[#09090B] text-white border-[#09090B] shadow-2xs"
+                : "bg-[#F4F4F5] hover:bg-[#E4E4E7] text-[#09090B] border-[#E4E4E7]"
             }`}
           >
             <span>All ({registry.nodes.length})</span>
@@ -391,8 +417,8 @@ export default function DashboardWorkspace() {
                 onClick={() => handleZoneFilter(zone)}
                 className={`h-7 flex items-center space-x-1.5 px-2.5 rounded-md text-[11px] font-medium transition-all cursor-pointer shrink-0 border ${
                   isActive
-                    ? "bg-[#ddf4ff] text-[#0969da] border-[#54aeff] font-semibold"
-                    : "bg-[#f6f8fa] hover:bg-[#eaeef2] text-[#1f2328] border-[#d0d7de]"
+                    ? "bg-[#09090B] text-white border-[#09090B] font-semibold"
+                    : "bg-[#F4F4F5] hover:bg-[#E4E4E7] text-[#09090B] border-[#E4E4E7]"
                 }`}
                 title={`Isolate ${zone} modules (${count})`}
               >
@@ -491,6 +517,7 @@ export default function DashboardWorkspace() {
           )}
         </div>
       </div>
+      )}
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden p-3 gap-3 bg-[#ffffff]">
         <section className="flex-1 flex flex-col min-w-0 h-full relative">
@@ -506,6 +533,8 @@ export default function DashboardWorkspace() {
                 focusRequest={focusRequest}
                 viewMode={viewMode}
                 isFocusNeighborhood={isNeighborhoodFocused}
+                zoneClusterIdToKey={progressiveDiagram.zoneClusterIdToKey}
+                subgraphIdToKey={progressiveDiagram.subgraphIdToKey}
                 onExpandZone={(zoneKey) => {
                   setExpandedZones((prev) => {
                     const next = new Set(prev);
@@ -556,27 +585,82 @@ export default function DashboardWorkspace() {
               )}
             </>
           ) : (
-            <div className="w-full h-full bg-[#f6f8fa] rounded-2xl border border-[#d0d7de] flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-white border border-[#d0d7de] flex items-center justify-center text-[#0969da] mb-4 shadow-xs">
-                <Compass className="w-8 h-8 animate-pulse" />
+            <div
+              className="w-full h-full bg-[#FAFAFA] rounded-2xl border border-[#E4E4E7] flex flex-col items-center justify-center p-6 relative overflow-hidden"
+              style={{
+                backgroundImage: "radial-gradient(#E4E4E7 1px, transparent 1px)",
+                backgroundSize: "24px 24px",
+              }}
+            >
+              <div className="max-w-md w-full bg-white border border-[#D4D4D8] rounded-2xl p-8 text-center shadow-sm">
+                {/* Minimal Monochrome 3-Node Architecture Schematic Icon */}
+                <div className="bg-[#F4F4F5] border border-[#E4E4E7] rounded-xl p-3 mx-auto w-fit">
+                  <svg
+                    viewBox="0 0 40 40"
+                    fill="none"
+                    className="w-10 h-10 text-[#18181B]"
+                    aria-hidden="true"
+                  >
+                    <rect x="13" y="3" width="14" height="9" rx="2.5" stroke="currentColor" strokeWidth="1.5" fill="#FFFFFF" />
+                    <rect x="3" y="27" width="14" height="9" rx="2.5" stroke="currentColor" strokeWidth="1.5" fill="#FFFFFF" />
+                    <rect x="23" y="27" width="14" height="9" rx="2.5" stroke="currentColor" strokeWidth="1.5" fill="#FFFFFF" />
+                    <path d="M20 12V19M20 19H10V27M20 19H30V27" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+
+                <h2 className="text-lg font-medium tracking-[-0.02em] text-[#09090B] mt-5">
+                  Paste a GitHub repository link to map its architecture
+                </h2>
+
+                <p className="text-xs text-[#52525B] leading-relaxed mt-2">
+                  Enter any public GitHub URL in the bar above—or sign in with GitHub to select from your private and public repositories. All AST parsing runs locally in your browser.
+                </p>
+
+                {/* Quick-Start Sample Pills */}
+                <div className="mt-6 pt-5 border-t border-[#E4E4E7]">
+                  <div className="font-mono text-[10px] tracking-widest text-[#71717A] uppercase">
+                    OR TRY AN EXAMPLE REPOSITORY
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                    {[
+                      "expressjs/express",
+                      "tiangolo/fastapi",
+                      "colinhacks/zod",
+                    ].map((repoSlug) => (
+                      <button
+                        key={repoSlug}
+                        type="button"
+                        disabled={loading}
+                        onClick={() => handleGenerate(`https://github.com/${repoSlug}`)}
+                        className="px-3 py-1.5 rounded-full bg-[#F4F4F5] hover:bg-[#09090B] text-[#09090B] hover:text-white border border-[#E4E4E7] hover:border-[#09090B] font-mono text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {repoSlug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Conditional Sign-In Nudge (Only if signed out) */}
+                {!user && (
+                  <div className="mt-6 pt-4 border-t border-[#E4E4E7] text-xs text-[#71717A] flex items-center justify-center gap-1.5 flex-wrap">
+                    <span>Want to map private repositories?</span>
+                    <button
+                      type="button"
+                      onClick={() => signInWithGithub().catch(() => {})}
+                      className="inline-flex items-center gap-0.5 text-[#09090B] font-medium underline underline-offset-4 hover:opacity-80 cursor-pointer"
+                    >
+                      <span>Sign in with GitHub</span>
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
-              <h2 className="text-xl font-bold text-[#1f2328] mb-2">No Repository Loaded</h2>
-              <p className="text-sm text-[#656d76] max-w-md mb-6 leading-relaxed">
-                Enter any public GitHub URL above or load a sample architecture map to explore modules, call chains, and functional zones.
-              </p>
-              <button
-                onClick={handleLoadDemo}
-                className="px-5 py-2.5 bg-[#1f2328] hover:bg-[#24292f] text-white rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all shadow-xs active:scale-98 cursor-pointer"
-              >
-                <span>Load Sample Repository</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
             </div>
           )}
         </section>
 
         {isCopilotOpen && (
-          <aside className="w-full md:w-[400px] h-full shrink-0 flex flex-col animate-in slide-in-from-right-4 duration-200">
+          <aside className="fixed inset-x-0 bottom-0 h-[72vh] z-40 shadow-2xl md:static md:w-[400px] md:h-full md:shadow-none shrink-0 flex flex-col animate-in slide-in-from-bottom-4 md:slide-in-from-right-4 duration-200">
             <ChatSidebar
               repoSkeleton={skeleton}
               repoUrl={architectureMap?.repoUrl || skeleton?.repoUrl || null}

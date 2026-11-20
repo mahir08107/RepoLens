@@ -20,6 +20,7 @@ import {
   BookOpen,
   Search,
   RefreshCw,
+  ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchUserRepositories, GitHubRepoItem } from '@/frontend/src/services/firebase';
@@ -49,7 +50,7 @@ const TopBar: React.FC<TopBarProps> = ({
   hasActiveSelection = false,
   initialRepoUrl,
 }) => {
-  const [url, setUrl] = useState(initialRepoUrl || 'https://github.com/mahir08107/RepoLens');
+  const [url, setUrl] = useState(initialRepoUrl || '');
   const [logoError, setLogoError] = useState(false);
   const [localAuthBusy, setLocalAuthBusy] = useState(false);
 
@@ -64,7 +65,7 @@ const TopBar: React.FC<TopBarProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (initialRepoUrl) {
+    if (initialRepoUrl !== undefined) {
       setUrl(initialRepoUrl);
     }
   }, [initialRepoUrl]);
@@ -170,16 +171,25 @@ const TopBar: React.FC<TopBarProps> = ({
   const isAuthWorking = localAuthBusy || authLoading;
 
   return (
-    <header className="h-[56px] min-h-[56px] bg-[#f6f8fa] border-b border-[#d0d7de] sticky top-0 z-30 transition-all select-none">
-      <div className="max-w-[1920px] h-full mx-auto px-4 flex items-center justify-between gap-3">
-        {/* 1. Left: Clickable Logo + RepoLens (Home) + / breadcrumb + repo badge + AST-Only pill */}
-        <div className="flex items-center space-x-2 shrink-0">
+    <header className="min-h-[56px] bg-[#09090B] border-b border-[#27272A] sticky top-0 z-30 transition-all select-none text-[#FAFAFA]">
+      <div className="max-w-[1920px] mx-auto px-3 sm:px-4 py-2 md:py-0 md:h-[56px] flex flex-wrap md:flex-nowrap items-center justify-between gap-y-2 gap-x-2 sm:gap-x-3">
+        {/* 1. Left: ← Home + Logo + RepoLens + breadcrumb + AST-ONLY pill */}
+        <div className="flex items-center space-x-2 shrink-0 order-1">
+          <Link
+            href="/"
+            title="Back to Landing Page"
+            className="h-8 px-2.5 sm:px-3 rounded-md border border-[#27272A] bg-[#18181B] hover:bg-[#27272A] text-xs font-medium text-[#E4E4E7] inline-flex items-center gap-1.5 transition-colors shrink-0"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Home</span>
+          </Link>
+
           <Link
             href="/"
             title="Back to RepoLens Home"
-            className="flex items-center space-x-2 group rounded-md px-1 py-0.5 -ml-1 hover:bg-[#eaeef2]/70 transition-colors"
+            className="flex items-center space-x-2 group rounded-md px-1 py-0.5 hover:bg-[#18181B] transition-colors"
           >
-            <div className="flex items-center justify-center h-7 w-7 shrink-0">
+            <div className="flex items-center justify-center h-7 w-7 rounded-lg bg-white p-0.5 shrink-0">
               {!logoError ? (
                 <img
                   src="/logo.png"
@@ -192,51 +202,42 @@ const TopBar: React.FC<TopBarProps> = ({
                       setLogoError(true);
                     }
                   }}
-                  className="h-7 w-7 object-contain rounded-md"
+                  className="h-6 w-6 object-contain"
                 />
               ) : (
-                <div className="flex items-center justify-center w-7 h-7 rounded-md bg-[#1f2328] text-white">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-4 h-4 text-[#79c0ff]"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
-                  </svg>
-                </div>
+                <span className="text-[11px] font-bold text-[#09090B] font-mono">RL</span>
               )}
             </div>
 
-            <span className="font-semibold text-[#1f2328] text-[15px] tracking-tight group-hover:text-[#0969da] transition-colors">
+            <span className="font-semibold text-[#FAFAFA] text-[15px] tracking-[-0.02em] group-hover:text-white transition-colors">
               RepoLens
             </span>
           </Link>
 
-          <span className="text-[#d0d7de] font-light">/</span>
+          <span className="hidden lg:inline text-[#3F3F46] font-light">/</span>
 
-          {repoBadgeText && (
+          {repoBadgeText ? (
             <span
-              className="hidden md:inline font-mono text-[11.5px] text-[#57606a] font-medium max-w-[190px] truncate"
+              className="hidden lg:inline font-mono text-[11.5px] text-[#A1A1AA] font-medium max-w-[180px] truncate"
               title={repoBadgeText}
             >
               {repoBadgeText}
             </span>
+          ) : (
+            <span className="hidden lg:inline font-mono text-xs text-[#71717A]">
+              No repository loaded
+            </span>
           )}
 
-          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#ddf4ff] text-[#0969da] border border-[#54aeff]/30">
-            AST-Only
+          <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-[#18181B] text-[#E4E4E7] border border-[#3F3F46]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A]" />
+            AST-ONLY
           </span>
         </div>
 
-        {/* 2. Center: Unified GitHub Primer Input Group ([ Your Repos ▾ | 🔗 URL × | Analyze ]) */}
+        {/* 2. Center (Row 2 on mobile, inline on md+): Dark-Framed Unified Input Group */}
         <div
-          className="flex items-center flex-1 max-w-2xl mx-2 h-8 rounded-md border border-[#d0d7de] bg-white shadow-2xs focus-within:border-[#0969da] focus-within:ring-2 focus-within:ring-[#0969da]/20 transition-all relative"
+          className="order-3 md:order-2 flex items-center w-full md:flex-1 md:max-w-2xl md:mx-2 h-8 rounded-md border border-[#27272A] bg-[#18181B] focus-within:border-[#71717A] transition-all relative"
           ref={dropdownRef}
         >
           {currentUser && (
@@ -250,16 +251,16 @@ const TopBar: React.FC<TopBarProps> = ({
                     loadUserRepos(githubAccessToken);
                   }
                 }}
-                className={`h-full px-2.5 text-xs font-medium rounded-l-[5px] border-r border-[#d0d7de] flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                className={`h-full px-2.5 text-xs font-medium rounded-l-[5px] border-r border-[#27272A] flex items-center space-x-1.5 transition-colors cursor-pointer ${
                   repoDropdownOpen
-                    ? 'bg-[#eaeef2] text-[#1f2328]'
-                    : 'bg-[#f6f8fa] hover:bg-[#eaeef2] text-[#24292f]'
+                    ? 'bg-[#27272A] text-white'
+                    : 'bg-[#18181B] hover:bg-[#27272A] text-[#E4E4E7]'
                 }`}
                 title="Pick one of your public or private GitHub repositories"
               >
-                <BookOpen className="w-3.5 h-3.5 text-[#656d76]" />
+                <BookOpen className="w-3.5 h-3.5 text-[#A1A1AA]" />
                 <span className="hidden lg:inline">Your Repos</span>
-                <ChevronDown className="w-3 h-3 text-[#656d76]" />
+                <ChevronDown className="w-3 h-3 text-[#A1A1AA]" />
               </button>
 
               {repoDropdownOpen && (
@@ -380,7 +381,7 @@ const TopBar: React.FC<TopBarProps> = ({
 
           <form onSubmit={handleSubmit} className="flex-1 h-full min-w-0">
             <div className="flex items-center w-full h-full">
-              <div className="pl-2.5 pr-1.5 text-[#656d76] flex items-center pointer-events-none shrink-0">
+              <div className="pl-2.5 pr-1.5 text-[#71717A] flex items-center pointer-events-none shrink-0">
                 <GitBranch className="w-3.5 h-3.5" />
               </div>
 
@@ -390,14 +391,14 @@ const TopBar: React.FC<TopBarProps> = ({
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 disabled={loading}
-                className="flex-1 h-full px-1.5 text-xs font-mono bg-transparent text-[#1f2328] placeholder-[#656d76] focus:outline-none min-w-0"
+                className="flex-1 h-full px-1.5 text-xs font-mono bg-transparent text-white placeholder-[#71717A] focus:outline-none min-w-0"
               />
 
               {url && !loading && (
                 <button
                   type="button"
                   onClick={() => setUrl('')}
-                  className="px-1.5 text-[#656d76] hover:text-[#1f2328] transition-colors cursor-pointer"
+                  className="px-1.5 text-[#71717A] hover:text-white transition-colors cursor-pointer"
                   title="Clear input"
                 >
                   <X className="w-3 h-3" />
@@ -407,11 +408,11 @@ const TopBar: React.FC<TopBarProps> = ({
               <button
                 type="submit"
                 disabled={loading || !url.trim()}
-                className="h-full px-3.5 rounded-r-[5px] bg-[#1f883d] hover:bg-[#1a7f37] active:bg-[#176f30] text-white text-xs font-medium border-l border-[#d0d7de] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-1.5 shrink-0 transition-colors"
+                className="h-full px-3.5 rounded-r-[5px] bg-white hover:bg-[#E4E4E7] active:bg-[#D4D4D8] text-[#09090B] text-xs font-medium border-l border-[#27272A] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center space-x-1.5 shrink-0 transition-colors"
               >
                 {loading ? (
                   <>
-                    <Loader2 className="w-3 h-3 animate-spin text-white" />
+                    <Loader2 className="w-3 h-3 animate-spin text-[#09090B]" />
                     <span>Analyzing...</span>
                   </>
                 ) : (
@@ -422,17 +423,18 @@ const TopBar: React.FC<TopBarProps> = ({
           </form>
         </div>
 
-        {/* 3. Right: Compact Primer Buttons (AST Payload, Copilot, Sign In) */}
-        <div className="flex items-center space-x-2 shrink-0">
+        {/* 3. Right (Row 1 right on mobile): Monochrome Studio Actions (AST Payload, Copilot, User) */}
+        <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0 order-2 md:order-3">
           {/* Payload Inspector Button */}
           <button
             type="button"
             onClick={onOpenInspector}
-            className="h-8 px-2.5 text-xs font-medium text-[#24292f] bg-[#f6f8fa] hover:bg-[#eaeef2] active:bg-[#e1e4e8] border border-[#d0d7de] rounded-md flex items-center space-x-1.5 transition-colors cursor-pointer"
+            className="h-8 px-2 sm:px-2.5 text-xs font-medium text-[#E4E4E7] bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] rounded-md flex items-center space-x-1.5 transition-colors cursor-pointer"
             title="Inspect privacy-sanitized AST payload"
           >
-            <Code2 className="w-3.5 h-3.5 text-[#656d76]" />
-            <span>AST Payload</span>
+            <Code2 className="w-3.5 h-3.5 text-[#A1A1AA]" />
+            <span className="hidden sm:inline">AST Payload</span>
+            <span className="sm:hidden">AST</span>
           </button>
 
           {/* Copilot Toggle Button */}
@@ -443,21 +445,21 @@ const TopBar: React.FC<TopBarProps> = ({
               title="Toggle AI Architecture Copilot (⌘I)"
               className={`h-8 px-2.5 text-xs font-medium border rounded-md flex items-center space-x-1.5 transition-all cursor-pointer ${
                 isCopilotOpen
-                  ? 'bg-[#ddf4ff] text-[#0969da] border-[#0969da] shadow-2xs'
-                  : 'bg-[#f6f8fa] text-[#24292f] hover:bg-[#eaeef2] border-[#d0d7de]'
+                  ? 'bg-white text-[#09090B] border-white'
+                  : 'bg-[#18181B] text-[#E4E4E7] hover:bg-[#27272A] border-[#27272A]'
               }`}
             >
               <div className="relative flex items-center">
                 <span>Copilot</span>
                 {hasActiveSelection && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#1f883d] ml-1" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] ml-1.5" />
                 )}
               </div>
               <kbd
-                className={`text-[10px] font-mono px-1 py-0.2 rounded border ${
+                className={`text-[10px] font-mono px-1 rounded border ${
                   isCopilotOpen
-                    ? 'bg-white text-[#0969da] border-[#54aeff]/50'
-                    : 'bg-white text-[#656d76] border-[#d0d7de]'
+                    ? 'bg-[#F4F4F5] text-[#09090B] border-[#D4D4D8]'
+                    : 'bg-[#09090B] text-[#A1A1AA] border-[#3F3F46]'
                 }`}
               >
                 ⌘I
@@ -467,19 +469,19 @@ const TopBar: React.FC<TopBarProps> = ({
 
           {/* GitHub Sign-In Button or User Badge */}
           {currentUser ? (
-            <div className="h-8 flex items-center space-x-1.5 bg-[#f6f8fa] border border-[#d0d7de] rounded-md px-2 shadow-2xs">
+            <div className="h-8 flex items-center space-x-1.5 bg-[#18181B] border border-[#27272A] rounded-md px-2">
               {currentUser.photoURL ? (
                 <img
                   src={currentUser.photoURL}
                   alt={currentUser.displayName || 'User'}
-                  className="w-4.5 h-4.5 rounded-full object-cover border border-[#d0d7de]"
+                  className="w-4.5 h-4.5 rounded-full object-cover border border-[#3F3F46]"
                 />
               ) : (
-                <div className="w-4.5 h-4.5 rounded-full bg-[#1f2328] text-white flex items-center justify-center text-[10px] font-bold">
+                <div className="w-4.5 h-4.5 rounded-full bg-white text-[#09090B] flex items-center justify-center text-[10px] font-bold">
                   {(currentUser.displayName || currentUser.email || 'G')[0].toUpperCase()}
                 </div>
               )}
-              <span className="text-xs font-medium text-[#1f2328] max-w-[90px] truncate hidden sm:inline">
+              <span className="text-xs font-mono font-medium text-[#FAFAFA] max-w-[90px] truncate hidden sm:inline">
                 {currentUser.username || currentUser.displayName?.split(' ')[0] || currentUser.email?.split('@')[0] || 'User'}
               </span>
               <button
@@ -487,7 +489,7 @@ const TopBar: React.FC<TopBarProps> = ({
                 onClick={handleSignOut}
                 disabled={isAuthWorking}
                 title="Sign out"
-                className="pl-1 border-l border-[#d0d7de] text-[#656d76] hover:text-[#cf222e] transition-colors cursor-pointer"
+                className="pl-1 border-l border-[#27272A] text-[#A1A1AA] hover:text-white transition-colors cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
@@ -497,7 +499,7 @@ const TopBar: React.FC<TopBarProps> = ({
               type="button"
               onClick={handleSignIn}
               disabled={isAuthWorking}
-              className="h-8 px-2.5 text-xs font-medium text-white bg-[#24292f] hover:bg-[#1f2328] active:bg-[#15171a] border border-[#1b1f24] rounded-md transition-all shadow-2xs cursor-pointer flex items-center space-x-1.5 disabled:opacity-60"
+              className="h-8 px-3 text-xs font-medium text-white bg-[#18181B] hover:bg-[#27272A] border border-[#3F3F46] hover:border-white rounded-md transition-all cursor-pointer flex items-center space-x-1.5 disabled:opacity-60"
               title="Sign in with GitHub for Private Repos"
             >
               {isAuthWorking ? (
@@ -505,8 +507,7 @@ const TopBar: React.FC<TopBarProps> = ({
               ) : (
                 <Github className="w-3.5 h-3.5 text-white" />
               )}
-              <span className="hidden sm:inline">Sign in for Private Repos</span>
-              <span className="sm:hidden">Sign in</span>
+              <span className="hidden sm:inline">Sign in</span>
             </button>
           )}
         </div>
@@ -514,15 +515,15 @@ const TopBar: React.FC<TopBarProps> = ({
 
       {/* Progress Sub-bar if loading */}
       {loading && statusText && (
-        <div className="bg-[#ddf4ff] border-t border-[#54aeff]/30 px-4 py-1 text-[11px] text-[#0969da] font-medium flex items-center justify-center space-x-2">
-          <Loader2 className="w-3 h-3 animate-spin text-[#0969da]" />
+        <div className="bg-[#18181B] border-t border-[#27272A] px-4 py-1 text-[11px] font-mono text-[#E4E4E7] flex items-center justify-center space-x-2">
+          <Loader2 className="w-3 h-3 animate-spin text-white" />
           <span>{statusText}</span>
         </div>
       )}
 
       {/* Error Bar */}
       {error && (
-        <div className="bg-[#ffebe9] border-t border-[#ff8182]/50 px-4 py-1 text-xs text-[#cf222e] flex items-center justify-between">
+        <div className="bg-[#2a1215] border-t border-red-900/60 px-4 py-1 text-xs text-red-300 flex items-center justify-between">
           <span>⚠️ {error}</span>
         </div>
       )}
