@@ -1,16 +1,15 @@
 // lib/api-config.ts
 /**
- * Resolves the API endpoint for Chat Copilot and Diagram generation.
+ * Resolves the API endpoint for Chat Copilot and Architecture Map generation.
  *
- * If VITE_API_BASE_URL / NEXT_PUBLIC_API_BASE_URL is explicitly configured and not an unreachable
- * default, it uses that. Otherwise, in the browser it defaults to the local Next.js proxy (/api/chat),
- * which forwards requests to the backend or handles fallback processing gracefully.
+ * In static exports (Firebase Hosting), frontend components call the external
+ * backend URL defined by NEXT_PUBLIC_API_BASE_URL or VITE_API_BASE_URL.
  */
 export const API_BASE_URL: string = (() => {
   const custom =
     (typeof process !== "undefined" &&
-      (process.env.REPOLENS_API_BASE_URL ||
-        process.env.NEXT_PUBLIC_API_BASE_URL ||
+      (process.env.NEXT_PUBLIC_API_BASE_URL ||
+        process.env.REPOLENS_API_BASE_URL ||
         process.env.VITE_API_BASE_URL)) ||
     "";
 
@@ -18,9 +17,16 @@ export const API_BASE_URL: string = (() => {
     return custom.replace(/\/+$/, "");
   }
 
-  // When running locally in development or production without a custom backend URL,
-  // route through the local Next.js API route (/api) so browser CORS and 503 errors never break the UI.
-  return "";
+  // When deployed to production (Firebase Hosting), default to Vercel production backend
+  if (
+    typeof window !== "undefined" &&
+    window.location.hostname !== "localhost" &&
+    window.location.hostname !== "127.0.0.1"
+  ) {
+    return "https://repolens-three-sable.vercel.app";
+  }
+
+  return "http://localhost:8080";
 })();
 
 /**

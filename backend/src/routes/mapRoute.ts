@@ -7,14 +7,14 @@ import { buildArchitectureMap } from '../ai/geminiArchitect.js';
 export const mapRouter = express.Router();
 
 /**
- * POST /api/generate-map
+ * POST /api/generate-map and POST /api/diagram
  * Generates or retrieves an ArchitectureMap for a RepoSkeleton.
  * Defensively accepts:
  * 1. { repoUrl, commitSha, skeleton: { files, ... } }
  * 2. { repoUrl, commitSha, files: [...] } (direct RepoSkeleton)
  * 3. { skeleton: RepoSkeleton }
  */
-mapRouter.post('/generate-map', async (req: Request, res: Response): Promise<void> => {
+mapRouter.post(['/generate-map', '/diagram'], async (req: Request, res: Response): Promise<void> => {
   try {
     const body = req.body;
     if (!body) {

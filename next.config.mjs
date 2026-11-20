@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
   env: {
     // Exposes the backend URL to client components. Accepts the Vite-style variable name
     // (VITE_API_BASE_URL) as well as NEXT_PUBLIC_API_BASE_URL from the repo-root .env files.

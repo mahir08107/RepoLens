@@ -23,7 +23,12 @@ import type { ArchitectureMap, RepoSkeleton } from "@/shared/types";
 import { parseRepo } from "@/lib/ast-parser";
 import { useAuth } from "@/components/AuthProvider";
 import { buildNodeRegistry } from "@/lib/node-registry";
-import { buildProgressiveMermaidDiagram } from "@/lib/diagram-generator";
+import {
+  buildProgressiveMermaidDiagram,
+  generateMermaidDiagram,
+  convertArchitectureMapToMermaid,
+} from "@/lib/diagram-generator";
+import { API_BASE_URL } from "@/lib/api-config";
 import type { FocusRequest } from "@/components/MermaidCanvas";
 
 const MermaidCanvas = dynamic(() => import("@/components/MermaidCanvas"), {
@@ -206,33 +211,66 @@ export default function DashboardWorkspace() {
       }
 
       setStatusText("Generating architecture map...");
-      const response = await fetch("/api/diagram", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoUrl: url, skeleton: extractedSkeleton }),
-      });
+      const apiBase =
+        (typeof process !== "undefined" &&
+          (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.VITE_API_BASE_URL)) ||
+        API_BASE_URL ||
+        "";
+      const targetUrl = apiBase ? `${apiBase.replace(/\/+$/, "")}/api/generate-map` : "/api/generate-map";
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Diagram generation failed");
+      let data: any = null;
+      try {
+        const response = await fetch(targetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repoUrl: url,
+            commitSha: extractedSkeleton?.commitSha || "latest",
+            skeleton: extractedSkeleton,
+            files: extractedSkeleton?.files || [],
+          }),
+        });
 
-      if (data.mermaidDefinition) {
-        setMermaidDef(data.mermaidDefinition);
-      }
-      if (data.groupColors) {
-        setLegend(data.groupColors);
-      }
-      if (data.architectureMap) {
-        setArchitectureMap(data.architectureMap);
-      } else {
-        setArchitectureMap(null);
+        if (response.ok) {
+          data = await response.json();
+        }
+      } catch (backendErr: any) {
+        console.warn("Backend /api/generate-map notice:", backendErr?.message);
       }
 
-      const activeSkeleton = extractedSkeleton || data.skeleton;
+      const activeSkeleton = extractedSkeleton || data?.skeleton;
       if (activeSkeleton) {
         setSkeleton(activeSkeleton);
         if (typeof window !== "undefined") {
           (window as any).__REPO_SKELETON__ = activeSkeleton;
         }
+      }
+
+      if (data && Array.isArray(data.nodes) && data.nodes.length > 0) {
+        setArchitectureMap(data);
+        if (activeSkeleton) {
+          const converted = convertArchitectureMapToMermaid(data, activeSkeleton);
+          if (converted.mermaidDefinition) {
+            setMermaidDef(converted.mermaidDefinition);
+            setLegend(converted.groupColors);
+          }
+        }
+      } else if (data?.mermaidDefinition) {
+        setMermaidDef(data.mermaidDefinition);
+        if (data.groupColors) {
+          setLegend(data.groupColors);
+        }
+        if (data.architectureMap) {
+          setArchitectureMap(data.architectureMap);
+        } else {
+          setArchitectureMap(null);
+        }
+      } else if (activeSkeleton) {
+        // High-fidelity algorithmic fallback so map always renders even if backend is waking up
+        const fallback = generateMermaidDiagram(activeSkeleton);
+        setMermaidDef(fallback.mermaidDefinition);
+        setLegend(fallback.groupColors);
+        setArchitectureMap(null);
       }
 
       // Auto-default to Overview when > 14 files, Expand All when <= 14 files

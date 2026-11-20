@@ -20,19 +20,7 @@
   },
   "rewrites": [
     {
-      "source": "/api/feedback",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/api/health",
-      "destination": {
-        "service": "backend"
-      }
-    },
-    {
-      "source": "/api/generate-map",
+      "source": "/api/(.*)",
       "destination": {
         "service": "backend"
       }

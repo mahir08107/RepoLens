@@ -112,7 +112,12 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
       const timeoutId = setTimeout(() => controller.abort(), 12000);
 
       let res: Response;
-      const targetUrl = API_BASE_URL ? `${API_BASE_URL}/api/chat` : "/api/chat";
+      const apiBase =
+        (typeof process !== "undefined" &&
+          (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.VITE_API_BASE_URL)) ||
+        API_BASE_URL ||
+        "";
+      const targetUrl = apiBase ? `${apiBase.replace(/\/+$/, "")}/api/chat` : "/api/chat";
 
       try {
         res = await fetch(targetUrl, {
@@ -121,17 +126,6 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
-      } catch (fetchErr: any) {
-        // If Express backend is offline, refused connection, or timed out, gracefully fallback to local Next.js API route
-        if (targetUrl !== "/api/chat") {
-          res = await fetch("/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-        } else {
-          throw fetchErr;
-        }
       } finally {
         clearTimeout(timeoutId);
       }

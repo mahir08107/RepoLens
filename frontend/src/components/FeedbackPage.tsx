@@ -134,7 +134,12 @@ export default function FeedbackPage() {
         formData.append('screenshots', item.file, item.file.name);
       });
 
-      const feedbackUrl = API_BASE_URL ? `${API_BASE_URL}/api/feedback` : '/api/feedback';
+      const apiBase =
+        (typeof process !== "undefined" &&
+          (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.VITE_API_BASE_URL)) ||
+        API_BASE_URL ||
+        "";
+      const feedbackUrl = apiBase ? `${apiBase.replace(/\/+$/, "")}/api/feedback` : '/api/feedback';
       const res = await fetch(feedbackUrl, {
         method: 'POST',
         body: formData,
