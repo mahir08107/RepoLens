@@ -26,8 +26,9 @@ import { parseRepo } from "@/lib/ast-parser";
 const MermaidCanvas = dynamic(() => import("@/components/MermaidCanvas"), {
   ssr: false,
   loading: () => (
-    <div className="flex-1 flex items-center justify-center bg-slate-50 text-slate-400">
-      <div className="animate-pulse text-sm font-medium">Loading architecture canvas...</div>
+    <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 text-slate-400 gap-3">
+      <img src="/logo.png" alt="Loading" className="w-10 h-10 object-contain animate-bounce opacity-80" />
+      <div className="text-xs font-medium">Loading architecture canvas...</div>
     </div>
   ),
 });
@@ -165,10 +166,10 @@ export default function Home() {
         </div>
 
         <div className="hidden lg:flex items-center space-x-2 text-slate-500 text-[11px]">
-          <span className="flex items-center space-x-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            <span>Client AST Engine Ready</span>
-          </span>
+          {/* <span className="flex items-center space-x-1"> */}
+            {/* <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> */}
+            {/* <span>Client AST Engine Ready</span> */}
+          {/* </span> */}
         </div>
       </div>
 
@@ -185,8 +186,8 @@ export default function Home() {
             />
           ) : (
             <div className="w-full h-full bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col items-center justify-center p-8 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mb-4 shadow-sm">
-                <Compass className="w-8 h-8 animate-pulse" />
+              <div className="w-20 h-20 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-center p-3 mb-4 shadow-xs">
+                <img src="/logo.png" alt="RepoLens Mascot" className="w-full h-full object-contain animate-pulse" />
               </div>
               <h2 className="text-xl font-bold text-slate-800 mb-2">No Repository Loaded</h2>
               <p className="text-sm text-slate-500 max-w-md mb-6 leading-relaxed">

@@ -33,15 +33,15 @@ const TopBar: React.FC<TopBarProps> = ({
       <div className="max-w-[1800px] mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
         {/* Brand / Title */}
         <div className="flex items-center space-x-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-900 via-slate-800 to-indigo-600 text-white shadow-sm">
-            <Compass className="w-5 h-5 text-indigo-200" />
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white border border-slate-200/80 shadow-xs p-1 hover:scale-105 transition-transform">
+            <img src="/logo.png" alt="RepoLens Mascot Logo" className="w-full h-full object-contain" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
               <span className="font-bold tracking-tight text-slate-900 text-base">RepoLens</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60">
+              {/* <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60">
                 v1.0 • Privacy AST
-              </span>
+              </span> */}
             </div>
             <p className="text-[11px] text-slate-500 hidden sm:block">AI Repository Architecture & Dependency Visualizer</p>
           </div>
