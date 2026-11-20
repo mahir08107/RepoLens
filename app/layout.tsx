@@ -2,8 +2,12 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'RepoLens — Privacy-First AI Repository Architecture & Dependency Visualizer',
+  title: 'RepoLens',
   description: 'Understand any GitHub codebase in seconds with client-side AST stripping and AI architecture diagrams.',
+  icons: {
+    icon: '/logo.png',
+    apple: '/logo.png',
+  },
 };
 
 export default function RootLayout({
